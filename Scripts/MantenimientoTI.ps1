@@ -1,6 +1,6 @@
 ```powershell
 # ============================================================
-# SOPORTETI - MANTENIMIENTO TI V3
+# SOPORTETI - MANTENIMIENTO TI V4
 # Mantenimiento y reparacion inteligente de Windows
 # ============================================================
 
@@ -18,12 +18,11 @@ $Logs = "$Base\Logs"
 New-Item -ItemType Directory -Path $Logs -Force | Out-Null
 
 $FechaArchivo = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$Fecha = Get-Date -Format "dd/MM/yyyy HH:mm:ss"
-
+$FechaInicio = Get-Date
 $Informe = "$Logs\Mantenimiento_$FechaArchivo.txt"
 
-$Usuario = $env:USERNAME
 $Equipo = $env:COMPUTERNAME
+$Usuario = $env:USERNAME
 
 $Acciones = @()
 $Advertencias = @()
@@ -45,6 +44,35 @@ function Separador {
     Escribir "============================================================"
 }
 
+function Ejecutar-Comando {
+    param(
+        [string]$Nombre,
+        [string]$Archivo,
+        [string[]]$Argumentos
+    )
+
+    Escribir ""
+    Escribir "Ejecutando: $Nombre"
+    Escribir ""
+
+    $Inicio = Get-Date
+
+    & $Archivo @Argumentos 2>&1 | ForEach-Object {
+        Escribir "$_"
+    }
+
+    $Codigo = $LASTEXITCODE
+
+    $Fin = Get-Date
+    $Duracion = $Fin - $Inicio
+
+    Escribir ""
+    Escribir "Codigo de salida : $Codigo"
+    Escribir "Duracion         : $($Duracion.ToString('hh\:mm\:ss'))"
+
+    return $Codigo
+}
+
 # ============================================================
 # COMPROBAR ADMINISTRADOR
 # ============================================================
@@ -61,7 +89,7 @@ if (-not $Administrador) {
 
     Write-Host ""
     Write-Host "============================================================" -ForegroundColor Red
-    Write-Host "       ERROR: SE REQUIEREN PRIVILEGIOS DE ADMINISTRADOR" -ForegroundColor Red
+    Write-Host "       SOPORTETI REQUIERE ADMINISTRADOR" -ForegroundColor Red
     Write-Host "============================================================" -ForegroundColor Red
     Write-Host ""
     Write-Host "Abre PowerShell como Administrador y vuelve a ejecutar." -ForegroundColor Yellow
@@ -72,49 +100,61 @@ if (-not $Administrador) {
 }
 
 # ============================================================
-# INICIO
+# CABECERA
 # ============================================================
 
 Escribir "============================================================"
-Escribir "              SOPORTETI - MANTENIMIENTO V3"
+Escribir "             SOPORTETI - MANTENIMIENTO V4"
 Escribir "============================================================"
-Escribir "Equipo          : $Equipo"
-Escribir "Usuario         : $Usuario"
-Escribir "Fecha           : $Fecha"
+Escribir "Equipo     : $Equipo"
+Escribir "Usuario    : $Usuario"
+Escribir "Inicio     : $($FechaInicio.ToString('dd/MM/yyyy HH:mm:ss'))"
 Escribir "============================================================"
-Escribir ""
 
 # ============================================================
-# ESTADO INICIAL DEL DISCO
+# INFORMACION DEL SISTEMA
 # ============================================================
 
-Escribir "================ ESTADO INICIAL ============================="
+Separador
+Escribir "================ INFORMACION DEL EQUIPO ====================="
+
+$Sistema = Get-CimInstance Win32_ComputerSystem
+$OS = Get-CimInstance Win32_OperatingSystem
+
+Escribir "Fabricante : $($Sistema.Manufacturer)"
+Escribir "Modelo     : $($Sistema.Model)"
+Escribir "Windows    : $($OS.Caption)"
+Escribir "Version    : $($OS.Version)"
+Escribir "Arquitectura: $($OS.OSArchitecture)"
+
+# ============================================================
+# ESTADO DEL DISCO
+# ============================================================
+
+Separador
+Escribir "================ ESTADO DEL DISCO ==========================="
 
 $DiscoAntes = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
 
-$LibreAntes = 0
-
 if ($DiscoAntes) {
 
-    $LibreAntes = [math]::Round(
-        $DiscoAntes.FreeSpace / 1GB,
-        2
-    )
-
-    $TotalAntes = [math]::Round(
-        $DiscoAntes.Size / 1GB,
-        2
-    )
+    $TotalAntes = [math]::Round($DiscoAntes.Size / 1GB, 2)
+    $LibreAntes = [math]::Round($DiscoAntes.FreeSpace / 1GB, 2)
 
     $PorcentajeAntes = [math]::Round(
         ($DiscoAntes.FreeSpace / $DiscoAntes.Size) * 100,
         1
     )
 
-    Escribir "Unidad        : C:"
     Escribir "Capacidad     : $TotalAntes GB"
     Escribir "Libre         : $LibreAntes GB"
     Escribir "Espacio libre : $PorcentajeAntes%"
+
+}
+else {
+
+    $LibreAntes = 0
+    $Advertencias += "No fue posible consultar la unidad C:"
 }
 
 # ============================================================
@@ -122,38 +162,29 @@ if ($DiscoAntes) {
 # ============================================================
 
 Separador
+Escribir "================ INICIO DEL MANTENIMIENTO =================="
 
-Escribir "                 MANTENIMIENTO TI V3"
-Escribir "============================================================"
 Escribir ""
-Escribir "Este proceso realizara mantenimiento y reparacion."
+Escribir "Esta herramienta realizara:"
 Escribir ""
-Escribir "El proceso inteligente de DISM funcionara asi:"
+Escribir " [1] Limpieza de archivos temporales"
+Escribir " [2] Limpieza de papelera"
+Escribir " [3] Limpieza de cache DNS"
+Escribir " [4] Analisis DISM"
+Escribir " [5] Reparacion DISM si es necesaria"
+Escribir " [6] Comprobacion SFC"
+Escribir " [7] Comprobacion CHKDSK"
+Escribir " [8] Optimizacion de unidad"
 Escribir ""
-Escribir "  1. CheckHealth  - comprobacion rapida"
-Escribir "  2. ScanHealth   - analisis profundo"
-Escribir "  3. RestoreHealth- SOLO si se detecta corrupcion"
-Escribir ""
-Escribir "Tambien se ejecutaran:"
-Escribir "  - Limpieza de temporales"
-Escribir "  - Papelera"
-Escribir "  - Cache DNS"
-Escribir "  - SFC"
-Escribir "  - CHKDSK"
-Escribir "  - Optimizacion de unidad"
-Escribir ""
-Escribir "IMPORTANTE:"
-Escribir "DISM /RestoreHealth puede tardar bastante."
-Escribir "NO apagues el equipo durante una reparacion."
+Escribir "DISM /RestoreHealth NO se ejecutara si no es necesario."
 Escribir ""
 
-$Confirmacion = Read-Host "Deseas iniciar el mantenimiento? (S/N)"
+$Confirmacion = Read-Host "Deseas continuar? (S/N)"
 
 if ($Confirmacion -notmatch "^[Ss]$") {
 
     Escribir ""
-    Escribir "Mantenimiento CANCELADO por el usuario."
-    Escribir ""
+    Escribir "Mantenimiento cancelado por el usuario."
     Escribir "Informe: $Informe"
 
     Read-Host "Presiona ENTER para salir"
@@ -161,37 +192,36 @@ if ($Confirmacion -notmatch "^[Ss]$") {
 }
 
 # ============================================================
-# TEMPORALES USUARIO
+# LIMPIEZA TEMPORAL USUARIO
 # ============================================================
 
 Separador
-
 Escribir "================ TEMPORALES DEL USUARIO ====================="
-
-$TempUsuario = $env:TEMP
-
-Escribir "Limpiando: $TempUsuario"
 
 try {
 
-    Get-ChildItem `
-        -Path $TempUsuario `
+    $ArchivosTemp = Get-ChildItem `
+        -Path $env:TEMP `
         -Force `
-        -ErrorAction SilentlyContinue |
+        -ErrorAction SilentlyContinue
+
+    $CantidadAntes = $ArchivosTemp.Count
+
+    $ArchivosTemp |
         Remove-Item `
         -Recurse `
         -Force `
         -ErrorAction SilentlyContinue
 
-    Escribir "Limpieza completada."
+    Escribir "Archivos temporales procesados: $CantidadAntes"
 
     $Acciones += "Temporales del usuario"
 
 }
 catch {
 
-    Escribir "Algunos archivos no pudieron eliminarse."
-    $Advertencias += "Temporales del usuario en uso."
+    Escribir "No fue posible limpiar todos los temporales."
+    $Advertencias += "Algunos temporales estaban en uso."
 }
 
 # ============================================================
@@ -199,33 +229,32 @@ catch {
 # ============================================================
 
 Separador
-
 Escribir "================ TEMPORALES WINDOWS ========================="
-
-$TempWindows = "C:\Windows\Temp"
-
-Escribir "Limpiando: $TempWindows"
 
 try {
 
-    Get-ChildItem `
-        -Path $TempWindows `
+    $ArchivosTempWin = Get-ChildItem `
+        -Path "C:\Windows\Temp" `
         -Force `
-        -ErrorAction SilentlyContinue |
+        -ErrorAction SilentlyContinue
+
+    $CantidadWin = $ArchivosTempWin.Count
+
+    $ArchivosTempWin |
         Remove-Item `
         -Recurse `
         -Force `
         -ErrorAction SilentlyContinue
 
-    Escribir "Limpieza completada."
+    Escribir "Archivos temporales procesados: $CantidadWin"
 
     $Acciones += "Temporales de Windows"
 
 }
 catch {
 
-    Escribir "Algunos archivos estaban en uso."
-    $Advertencias += "Temporales de Windows en uso."
+    Escribir "No fue posible limpiar todos los temporales."
+    $Advertencias += "Algunos temporales de Windows estaban en uso."
 }
 
 # ============================================================
@@ -233,7 +262,6 @@ catch {
 # ============================================================
 
 Separador
-
 Escribir "================ PAPELERA ==================================="
 
 try {
@@ -245,7 +273,7 @@ try {
 
     Escribir "Papelera procesada correctamente."
 
-    $Acciones += "Limpieza de papelera"
+    $Acciones += "Papelera"
 
 }
 catch {
@@ -259,99 +287,170 @@ catch {
 # ============================================================
 
 Separador
-
 Escribir "================ CACHE DNS =================================="
 
-ipconfig /flushdns | ForEach-Object {
-    Escribir $_
+try {
+
+    $DNSResultado = ipconfig /flushdns 2>&1
+
+    foreach ($Linea in $DNSResultado) {
+        Escribir $Linea
+    }
+
+    $Acciones += "Cache DNS"
+
+}
+catch {
+
+    Escribir "No fue posible limpiar la cache DNS."
+    $Advertencias += "Cache DNS no limpiada."
 }
 
-$Acciones += "Limpieza de cache DNS"
-
 # ============================================================
-# DISM - CHECKHEALTH
+# DISM CHECKHEALTH
 # ============================================================
 
 Separador
-
 Escribir "================ DISM - CHECKHEALTH ========================="
 
-Escribir "Ejecutando comprobacion rapida..."
-Escribir ""
-Escribir "DISM /Online /Cleanup-Image /CheckHealth"
-Escribir ""
+Escribir "Realizando comprobacion rapida de la imagen de Windows."
 
-& DISM.exe /Online /Cleanup-Image /CheckHealth
+$SalidaCheck = @()
+
+$InicioCheck = Get-Date
+
+$SalidaCheck = & DISM.exe /Online /Cleanup-Image /CheckHealth 2>&1
 
 $CodigoCheck = $LASTEXITCODE
 
+$FinCheck = Get-Date
+$DuracionCheck = $FinCheck - $InicioCheck
+
+foreach ($Linea in $SalidaCheck) {
+    Escribir "$Linea"
+}
+
 Escribir ""
-Escribir "Codigo CheckHealth: $CodigoCheck"
+Escribir "Codigo : $CodigoCheck"
+Escribir "Tiempo : $($DuracionCheck.ToString('hh\:mm\:ss'))"
 
-if ($CodigoCheck -ne 0) {
+# ============================================================
+# INTERPRETACION CHECKHEALTH
+# ============================================================
 
-    $Advertencias += "DISM CheckHealth devolvio codigo $CodigoCheck"
+$TextoCheck = ($SalidaCheck -join " ").ToLower()
+
+$CorrupcionCheck = $false
+$ReparableCheck = $false
+
+if ($TextoCheck -match "no component store corruption detected") {
+
+    Escribir ""
+    Escribir "[OK] No se detecto corrupcion en la imagen de Windows."
+
+}
+elseif ($TextoCheck -match "component store corruption detected") {
+
+    Escribir ""
+    Escribir "[ALERTA] DISM detecto corrupcion en la imagen."
+
+    $CorrupcionCheck = $true
+}
+elseif ($TextoCheck -match "repairable") {
+
+    Escribir ""
+    Escribir "[ALERTA] DISM indica que la imagen puede repararse."
+
+    $CorrupcionCheck = $true
+    $ReparableCheck = $true
+}
+else {
+
+    Escribir ""
+    Escribir "[INFO] No fue posible interpretar completamente CheckHealth."
+
+    $Advertencias += "DISM CheckHealth no pudo interpretarse completamente."
 }
 
 # ============================================================
-# DISM - SCANHEALTH
+# DISM SCANHEALTH
 # ============================================================
 
 Separador
-
 Escribir "================ DISM - SCANHEALTH =========================="
 
-Escribir "Analizando la imagen de Windows..."
-Escribir ""
-Escribir "DISM /Online /Cleanup-Image /ScanHealth"
-Escribir ""
-Escribir "Esta comprobacion puede tardar."
+Escribir "Realizando analisis profundo."
+Escribir "Esta etapa puede tardar varios minutos."
 Escribir ""
 
-& DISM.exe /Online /Cleanup-Image /ScanHealth
+$SalidaScan = @()
+
+$InicioScan = Get-Date
+
+$SalidaScan = & DISM.exe /Online /Cleanup-Image /ScanHealth 2>&1
 
 $CodigoScan = $LASTEXITCODE
 
-Escribir ""
-Escribir "Codigo ScanHealth: $CodigoScan"
+$FinScan = Get-Date
+$DuracionScan = $FinScan - $InicioScan
 
-# ============================================================
-# DETERMINAR SI HAY CORRUPCION
-# ============================================================
+foreach ($Linea in $SalidaScan) {
+    Escribir "$Linea"
+}
+
+Escribir ""
+Escribir "Codigo : $CodigoScan"
+Escribir "Tiempo : $($DuracionScan.ToString('hh\:mm\:ss'))"
+
+$TextoScan = ($SalidaScan -join " ").ToLower()
 
 $NecesitaRestore = $false
 
-if ($CodigoScan -eq 0) {
+if ($TextoScan -match "no component store corruption detected") {
 
     Escribir ""
-    Escribir "ScanHealth finalizo correctamente."
+    Escribir "[OK] ScanHealth confirma que no se detecto corrupcion."
+
+}
+elseif ($TextoScan -match "component store corruption detected") {
+
+    Escribir ""
+    Escribir "[ALERTA] ScanHealth detecto corrupcion."
+
+    $NecesitaRestore = $true
+
+}
+elseif ($TextoScan -match "repairable") {
+
+    Escribir ""
+    Escribir "[ALERTA] La imagen de Windows puede repararse."
+
+    $NecesitaRestore = $true
 
 }
 else {
 
     Escribir ""
-    Escribir "ScanHealth devolvio codigo: $CodigoScan"
-    Escribir "Se analizara la necesidad de reparacion."
+    Escribir "[INFO] No se pudo determinar automaticamente el estado."
+    Escribir "Se utilizara el codigo de salida como referencia."
 
-    $NecesitaRestore = $true
-
-    $Advertencias += "DISM ScanHealth detecto una condicion que requiere revision."
+    if ($CodigoScan -ne 0) {
+        $NecesitaRestore = $true
+    }
 }
 
 # ============================================================
-# DISM - RESTOREHEALTH
+# DISM RESTOREHEALTH
 # ============================================================
 
 if ($NecesitaRestore) {
 
     Separador
-
     Escribir "================ DISM - RESTOREHEALTH ======================="
 
-    Escribir "SE DETECTO UNA CONDICION QUE REQUIERE REPARACION."
+    Escribir "[REPARACION] Se detecto corrupcion."
     Escribir ""
-    Escribir "Ejecutando:"
-    Escribir "DISM /Online /Cleanup-Image /RestoreHealth"
+    Escribir "Iniciando reparacion de la imagen de Windows."
     Escribir ""
     Escribir "IMPORTANTE:"
     Escribir "El porcentaje puede permanecer quieto durante varios minutos."
@@ -359,65 +458,60 @@ if ($NecesitaRestore) {
     Escribir "NO apagues el equipo."
     Escribir ""
 
-    $InicioDISM = Get-Date
+    $InicioRestore = Get-Date
 
-    try {
+    $SalidaRestore = & DISM.exe /Online /Cleanup-Image /RestoreHealth 2>&1
 
-        & DISM.exe /Online /Cleanup-Image /RestoreHealth
+    $CodigoRestore = $LASTEXITCODE
 
-        $CodigoRestore = $LASTEXITCODE
+    $FinRestore = Get-Date
+    $DuracionRestore = $FinRestore - $InicioRestore
 
-        $FinDISM = Get-Date
+    foreach ($Linea in $SalidaRestore) {
+        Escribir "$Linea"
+    }
 
-        $DuracionDISM = $FinDISM - $InicioDISM
+    Escribir ""
+    Escribir "Codigo : $CodigoRestore"
+    Escribir "Tiempo : $($DuracionRestore.ToString('hh\:mm\:ss'))"
+
+    if ($CodigoRestore -eq 0) {
 
         Escribir ""
-        Escribir "Codigo RestoreHealth: $CodigoRestore"
-        Escribir "Duracion: $($DuracionDISM.ToString('hh\:mm\:ss'))"
+        Escribir "[OK] DISM completo la reparacion correctamente."
 
-        if ($CodigoRestore -eq 0) {
-
-            Escribir "DISM reparo correctamente la imagen de Windows."
-
-            $Acciones += "DISM: reparacion completada"
-
-        }
-        elseif ($CodigoRestore -eq 3010) {
-
-            Escribir "DISM termino correctamente y requiere reinicio."
-
-            $Acciones += "DISM: reparacion completada"
-
-            $Advertencias += "DISM requiere reiniciar el equipo."
-
-        }
-        else {
-
-            Escribir "DISM finalizo con codigo $CodigoRestore."
-
-            $Problemas += "DISM RestoreHealth devolvio codigo $CodigoRestore."
-        }
+        $Acciones += "DISM: imagen reparada"
 
     }
-    catch {
+    elseif ($CodigoRestore -eq 3010) {
 
-        Escribir "ERROR ejecutando RestoreHealth."
-        Escribir "Detalle: $($_.Exception.Message)"
+        Escribir ""
+        Escribir "[OK] DISM termino correctamente."
+        Escribir "[AVISO] Se requiere reiniciar Windows."
 
-        $Problemas += "No fue posible ejecutar DISM RestoreHealth."
+        $Acciones += "DISM: reparacion completada"
+
+        $Advertencias += "DISM requiere reinicio."
+
+    }
+    else {
+
+        Escribir ""
+        Escribir "[ERROR] DISM termino con codigo $CodigoRestore."
+
+        $Problemas += "DISM RestoreHealth termino con codigo $CodigoRestore."
     }
 
 }
 else {
 
     Separador
+    Escribir "================ DISM - REPARACION ==========================="
 
-    Escribir "================ DISM ======================================="
+    Escribir "[OK] RestoreHealth NO fue necesario."
+    Escribir "No se realizara reparacion profunda."
 
-    Escribir "No se detecto necesidad de ejecutar RestoreHealth."
-    Escribir "Se ahorra la reparacion profunda."
-
-    $Acciones += "DISM: no fue necesario reparar"
+    $Acciones += "DISM: reparacion no necesaria"
 }
 
 # ============================================================
@@ -425,51 +519,56 @@ else {
 # ============================================================
 
 Separador
+Escribir "================ SFC /SCANNOW ================================"
 
-Escribir "================ SFC ========================================"
-
-Escribir "Comprobando archivos protegidos de Windows..."
-Escribir ""
-Escribir "SFC /SCANNOW"
-Escribir ""
-Escribir "Este proceso puede tardar."
+Escribir "Comprobando archivos protegidos de Windows."
 Escribir ""
 
 $InicioSFC = Get-Date
 
-try {
+$SalidaSFC = & sfc.exe /scannow 2>&1
 
-    & sfc.exe /scannow
+$CodigoSFC = $LASTEXITCODE
 
-    $CodigoSFC = $LASTEXITCODE
+$FinSFC = Get-Date
+$DuracionSFC = $FinSFC - $InicioSFC
 
-    $FinSFC = Get-Date
+foreach ($Linea in $SalidaSFC) {
+    Escribir "$Linea"
+}
 
-    $DuracionSFC = $FinSFC - $InicioSFC
+Escribir ""
+Escribir "Codigo : $CodigoSFC"
+Escribir "Tiempo : $($DuracionSFC.ToString('hh\:mm\:ss'))"
 
-    Escribir ""
-    Escribir "Codigo SFC: $CodigoSFC"
-    Escribir "Duracion: $($DuracionSFC.ToString('hh\:mm\:ss'))"
+$TextoSFC = ($SalidaSFC -join " ").ToLower()
 
-    if ($CodigoSFC -eq 0) {
+if ($TextoSFC -match "did not find any integrity violations") {
 
-        Escribir "SFC finalizado correctamente."
-
-        $Acciones += "SFC: comprobacion completada"
-
-    }
-    else {
-
-        Escribir "SFC finalizo con codigo $CodigoSFC."
-
-        $Advertencias += "SFC devolvio codigo $CodigoSFC."
-    }
+    Escribir "[OK] No se encontraron violaciones de integridad."
+    $Acciones += "SFC: sistema integro"
 
 }
-catch {
+elseif ($TextoSFC -match "found corrupt files and successfully repaired") {
 
-    Escribir "ERROR ejecutando SFC."
-    $Problemas += "No fue posible ejecutar SFC."
+    Escribir "[REPARADO] SFC encontro archivos dañados y los reparo."
+    $Acciones += "SFC: archivos reparados"
+
+}
+elseif ($TextoSFC -match "found corrupt files but was unable to fix") {
+
+    Escribir "[ADVERTENCIA] SFC encontro archivos dañados que no pudo reparar."
+
+    $Problemas += "SFC encontro archivos que no pudo reparar."
+
+}
+else {
+
+    if ($CodigoSFC -ne 0) {
+
+        $Advertencias += "SFC termino con codigo $CodigoSFC."
+
+    }
 }
 
 # ============================================================
@@ -477,42 +576,38 @@ catch {
 # ============================================================
 
 Separador
-
 Escribir "================ CHKDSK ====================================="
 
-Escribir "Comprobando el sistema de archivos..."
-Escribir ""
-Escribir "CHKDSK C: /SCAN"
+Escribir "Comprobando el sistema de archivos de C:."
 Escribir ""
 
-try {
+$InicioCHK = Get-Date
 
-    & chkdsk.exe C: /scan
+$SalidaCHK = & chkdsk.exe C: /scan 2>&1
 
-    $CodigoCHKDSK = $LASTEXITCODE
+$CodigoCHK = $LASTEXITCODE
 
-    Escribir ""
-    Escribir "Codigo CHKDSK: $CodigoCHKDSK"
+$FinCHK = Get-Date
+$DuracionCHK = $FinCHK - $InicioCHK
 
-    if ($CodigoCHKDSK -eq 0) {
+foreach ($Linea in $SalidaCHK) {
+    Escribir "$Linea"
+}
 
-        Escribir "CHKDSK finalizado correctamente."
+Escribir ""
+Escribir "Codigo : $CodigoCHK"
+Escribir "Tiempo : $($DuracionCHK.ToString('hh\:mm\:ss'))"
 
-        $Acciones += "CHKDSK: comprobacion completada"
+if ($CodigoCHK -eq 0) {
 
-    }
-    else {
-
-        Escribir "CHKDSK devolvio codigo $CodigoCHKDSK."
-
-        $Advertencias += "CHKDSK devolvio codigo $CodigoCHKDSK."
-    }
+    Escribir "[OK] CHKDSK finalizo correctamente."
+    $Acciones += "CHKDSK: comprobacion completada"
 
 }
-catch {
+else {
 
-    Escribir "ERROR ejecutando CHKDSK."
-    $Problemas += "No fue posible ejecutar CHKDSK."
+    Escribir "[ADVERTENCIA] CHKDSK devolvio codigo $CodigoCHK."
+    $Advertencias += "CHKDSK devolvio codigo $CodigoCHK."
 }
 
 # ============================================================
@@ -520,77 +615,38 @@ catch {
 # ============================================================
 
 Separador
-
 Escribir "================ OPTIMIZACION ==============================="
 
 Escribir "Windows determinara automaticamente la optimizacion adecuada."
 Escribir ""
-Escribir "Ejecutando:"
-Escribir "DEFRAG C: /O /U"
+
+$InicioDefrag = Get-Date
+
+$SalidaDefrag = & defrag.exe C: /O /U 2>&1
+
+$CodigoDefrag = $LASTEXITCODE
+
+$FinDefrag = Get-Date
+$DuracionDefrag = $FinDefrag - $InicioDefrag
+
+foreach ($Linea in $SalidaDefrag) {
+    Escribir "$Linea"
+}
+
 Escribir ""
+Escribir "Codigo : $CodigoDefrag"
+Escribir "Tiempo : $($DuracionDefrag.ToString('hh\:mm\:ss'))"
 
-try {
+if ($CodigoDefrag -eq 0) {
 
-    & defrag.exe C: /O /U
-
-    $CodigoDefrag = $LASTEXITCODE
-
-    Escribir ""
-    Escribir "Codigo optimizacion: $CodigoDefrag"
-
-    if ($CodigoDefrag -eq 0) {
-
-        Escribir "Optimizacion completada."
-
-        $Acciones += "Optimizacion de C:"
-
-    }
-    else {
-
-        Escribir "La optimizacion devolvio codigo $CodigoDefrag."
-
-        $Advertencias += "La optimizacion devolvio codigo $CodigoDefrag."
-    }
-
-}
-catch {
-
-    Escribir "ERROR durante la optimizacion."
-    $Problemas += "No fue posible optimizar C:"
-}
-
-# ============================================================
-# WINDOWS UPDATE
-# ============================================================
-
-Separador
-
-Escribir "================ WINDOWS UPDATE ============================="
-
-$WU = Get-Service -Name wuauserv
-
-if ($WU) {
-
-    Escribir "Estado del servicio: $($WU.Status)"
-
-    if ($WU.Status -eq "Running") {
-
-        Escribir "Windows Update: ACTIVO"
-
-    }
-    else {
-
-        Escribir "Windows Update: INACTIVO"
-
-        $Advertencias += "Windows Update no esta activo."
-    }
+    Escribir "[OK] Optimizacion completada."
+    $Acciones += "Optimizacion de C:"
 
 }
 else {
 
-    Escribir "No fue posible consultar Windows Update."
-
-    $Advertencias += "No fue posible consultar Windows Update."
+    Escribir "[ADVERTENCIA] La optimizacion devolvio codigo $CodigoDefrag."
+    $Advertencias += "Optimizacion devolvio codigo $CodigoDefrag."
 }
 
 # ============================================================
@@ -598,12 +654,16 @@ else {
 # ============================================================
 
 Separador
-
 Escribir "================ RESULTADO DEL DISCO ========================"
 
 $DiscoDespues = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
 
 if ($DiscoDespues) {
+
+    $TotalDespues = [math]::Round(
+        $DiscoDespues.Size / 1GB,
+        2
+    )
 
     $LibreDespues = [math]::Round(
         $DiscoDespues.FreeSpace / 1GB,
@@ -620,86 +680,111 @@ if ($DiscoDespues) {
         2
     )
 
-    Escribir "Libre antes      : $LibreAntes GB"
-    Escribir "Libre despues    : $LibreDespues GB"
+    Escribir "Capacidad final  : $TotalDespues GB"
+    Escribir "Libre final      : $LibreDespues GB"
     Escribir "Espacio libre    : $PorcentajeDespues%"
     Escribir "Espacio liberado : $Liberado GB"
 }
 
 # ============================================================
-# RESUMEN FINAL
+# RESUMEN
 # ============================================================
 
-Separador
+$FechaFin = Get-Date
+$DuracionTotal = $FechaFin - $FechaInicio
 
+Separador
 Escribir "                  RESULTADO FINAL"
 Escribir "============================================================"
 Escribir ""
 
-Escribir "ACCIONES REALIZADAS: $($Acciones.Count)"
-Escribir ""
-
-foreach ($Accion in $Acciones) {
-
-    Escribir "[OK] $Accion"
-}
+Escribir "Inicio       : $($FechaInicio.ToString('dd/MM/yyyy HH:mm:ss'))"
+Escribir "Finalizacion : $($FechaFin.ToString('dd/MM/yyyy HH:mm:ss'))"
+Escribir "Duracion     : $($DuracionTotal.ToString('hh\:mm\:ss'))"
 
 Escribir ""
+Escribir "---------------- ACCIONES ----------------"
 
-Escribir "ADVERTENCIAS: $($Advertencias.Count)"
+if ($Acciones.Count -eq 0) {
 
-foreach ($Advertencia in $Advertencias) {
-
-    Escribir "[ADVERTENCIA] $Advertencia"
-}
-
-Escribir ""
-
-Escribir "PROBLEMAS: $($Problemas.Count)"
-
-foreach ($Problema in $Problemas) {
-
-    Escribir "[PROBLEMA] $Problema"
-}
-
-Escribir ""
-
-if ($Problemas.Count -gt 0) {
-
-    Escribir "ESTADO GENERAL: REQUIERE ATENCION"
-
-}
-elseif ($Advertencias.Count -gt 0) {
-
-    Escribir "ESTADO GENERAL: COMPLETADO CON OBSERVACIONES"
+    Escribir "Ninguna"
 
 }
 else {
 
-    Escribir "ESTADO GENERAL: MANTENIMIENTO COMPLETADO"
+    foreach ($Accion in $Acciones) {
+        Escribir "[OK] $Accion"
+    }
+}
+
+Escribir ""
+Escribir "---------------- ADVERTENCIAS -------------"
+
+if ($Advertencias.Count -eq 0) {
+
+    Escribir "Ninguna"
 
 }
+else {
+
+    foreach ($Advertencia in $Advertencias) {
+        Escribir "[ADVERTENCIA] $Advertencia"
+    }
+}
+
+Escribir ""
+Escribir "---------------- PROBLEMAS ----------------"
+
+if ($Problemas.Count -eq 0) {
+
+    Escribir "Ninguno"
+
+}
+else {
+
+    foreach ($Problema in $Problemas) {
+        Escribir "[PROBLEMA] $Problema"
+    }
+}
+
+Escribir ""
+Escribir "============================================================"
+
+if ($Problemas.Count -gt 0) {
+
+    $Estado = "REQUIERE ATENCION"
+
+}
+elseif ($Advertencias.Count -gt 0) {
+
+    $Estado = "COMPLETADO CON OBSERVACIONES"
+
+}
+else {
+
+    $Estado = "MANTENIMIENTO COMPLETADO"
+
+}
+
+Escribir "ESTADO GENERAL: $Estado"
+Escribir "============================================================"
 
 # ============================================================
 # INFORME
 # ============================================================
 
-Separador
-
-Escribir "Mantenimiento finalizado."
 Escribir ""
 Escribir "Informe guardado en:"
 Escribir $Informe
 
 # ============================================================
-# FINAL
+# FINAL EN PANTALLA
 # ============================================================
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "          SOPORTETI - MANTENIMIENTO V3 FINALIZADO" -ForegroundColor Cyan
+Write-Host "          SOPORTETI - MANTENIMIENTO V4" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host ""
 
 if ($Problemas.Count -gt 0) {
 
@@ -717,13 +802,10 @@ else {
 }
 
 Write-Host ""
-Write-Host "Acciones realizadas : $($Acciones.Count)"
-Write-Host "Advertencias        : $($Advertencias.Count)"
-Write-Host "Problemas           : $($Problemas.Count)"
-Write-Host ""
-Write-Host "Informe:" -ForegroundColor Green
-Write-Host $Informe -ForegroundColor Yellow
+Write-Host "Duracion total : $($DuracionTotal.ToString('hh\:mm\:ss'))"
+Write-Host "Informe        : $Informe"
 Write-Host ""
 
 Read-Host "Presiona ENTER para salir"
 ```
+

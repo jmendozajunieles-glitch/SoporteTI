@@ -1,460 +1,244 @@
 ```powershell
 # ============================================================
-# SOPORTETI - ACTUALIZACION DE APLICACIONES V2
-# Actualizacion automatica mediante WinGet
-# Detecta aplicaciones, actualiza y genera informe
-# NO REINICIA AUTOMATICAMENTE
+# SOPORTETI - ACTUALIZADOR DE APLICACIONES V3
 # ============================================================
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "SilentlyContinue"
 
 Clear-Host
 
-# ============================================================
-# CONFIGURACION
-# ============================================================
-
 $Base = "C:\SoporteTI"
-$Logs = "$Base\Logs"
-
-New-Item -ItemType Directory -Path $Logs -Force | Out-Null
+$LogDir = "$Base\Logs"
+New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
 $Fecha = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$Informe = "$Logs\ActualizacionApps_$Fecha.txt"
+$Log = "$LogDir\ActualizarAplicaciones_$Fecha.txt"
 
-$Inicio = Get-Date
-
-# ============================================================
-# CONTADORES
-# ============================================================
-
-$Encontradas = 0
-$Actualizadas = 0
-$Fallidas = 0
-$Pendientes = 0
-
-# ============================================================
-# FUNCIONES
-# ============================================================
-
-function Log {
-    param(
-        [string]$Texto
-    )
+function Escribir {
+    param([string]$Texto)
 
     Write-Host $Texto
-    $Texto | Out-File -FilePath $Informe -Append -Encoding UTF8
+    $Texto | Out-File $Log -Append -Encoding UTF8
 }
 
 function Separador {
-    Log ""
-    Log "============================================================"
+    Escribir ""
+    Escribir "============================================================"
 }
 
-# ============================================================
-# CABECERA
-# ============================================================
-
-Log "============================================================"
-Log "       SOPORTETI - ACTUALIZACION DE APLICACIONES V2"
-Log "============================================================"
-Log "Equipo : $env:COMPUTERNAME"
-Log "Usuario: $env:USERNAME"
-Log "Fecha  : $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')"
-Log "============================================================"
+Escribir "============================================================"
+Escribir "       SOPORTETI - ACTUALIZADOR DE APLICACIONES V3"
+Escribir "============================================================"
+Escribir "Equipo : $env:COMPUTERNAME"
+Escribir "Fecha  : $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')"
+Escribir "============================================================"
 
 # ============================================================
-# COMPROBAR WINGET
+# 1. WINGET
 # ============================================================
 
 Separador
-Log "================ COMPROBANDO WINGET ========================"
+Escribir "BUSCANDO ACTUALIZACIONES CON WINGET..."
+Escribir ""
 
 $Winget = Get-Command winget -ErrorAction SilentlyContinue
 
-if (-not $Winget) {
+if ($Winget) {
 
-    Log "[ERROR] WinGet no esta disponible."
-
-    Log ""
-    Log "POSIBLE CAUSA:"
-    Log "Windows Package Manager no esta instalado o no esta disponible."
-
-    Log ""
-    Log "SOLUCION:"
-    Log "Actualizar Windows y comprobar que Microsoft App Installer este instalado."
-
-    Log ""
-    Log "ESTADO: NO SE PUEDE CONTINUAR"
-    Log "Informe: $Informe"
-
-    Read-Host "Presiona ENTER para salir"
-    exit
-}
-
-Log "[OK] WinGet encontrado."
-Log "Version: $(& winget --version)"
-
-# ============================================================
-# BUSCAR ACTUALIZACIONES
-# ============================================================
-
-Separador
-Log "================ BUSQUEDA DE ACTUALIZACIONES ==============="
-
-Log "Consultando aplicaciones..."
-Log ""
-
-$Busqueda = @(
-    & winget upgrade `
-        --include-unknown `
-        --source winget `
-        --accept-source-agreements `
-        --disable-interactivity 2>&1
-)
-
-$TextoBusqueda = $Busqueda -join "`n"
-
-# Guardar busqueda
-$Busqueda |
-    Out-File -FilePath $Informe -Append -Encoding UTF8
-
-# ============================================================
-# NO HAY ACTUALIZACIONES
-# ============================================================
-
-if ($TextoBusqueda -match "No upgrades available") {
-
-    Log ""
-    Log "[OK] No se encontraron actualizaciones disponibles."
-
-    $Encontradas = 0
-
-}
-else {
-
-    # ========================================================
-    # MOSTRAR RESULTADOS
-    # ========================================================
-
-    Log ""
-    Log "Aplicaciones encontradas con posible actualizacion:"
-    Log ""
-
-    foreach ($Linea in $Busqueda) {
-
-        if (
-            $Linea -match "winget" -or
-            $Linea -match "Disponible" -or
-            $Linea -match "Version"
-        ) {
-
-            Log $Linea
-        }
-    }
-
-    # ========================================================
-    # CONTAR APLICACIONES
-    # ========================================================
-
-    foreach ($Linea in $Busqueda) {
-
-        if (
-            $Linea -match "^\s*\S.+\s{2,}\S+\s{2,}\S+\s{2,}\S+.*winget\s*$"
-        ) {
-
-            $Encontradas++
-        }
-    }
-
-    # Si no pudo determinar el numero, intentamos con
-    # la linea de "actualizaciones disponibles".
-
-    if ($Encontradas -eq 0) {
-
-        if ($TextoBusqueda -match "(\d+)\s+actualizaciones?\s+disponibles?") {
-
-            $Encontradas = [int]$Matches[1]
-        }
-    }
-
-    Log ""
-    Log "Actualizaciones detectadas: $Encontradas"
-}
-
-# ============================================================
-# SI NO HAY NADA QUE ACTUALIZAR
-# ============================================================
-
-if ($Encontradas -eq 0 -and
-    $TextoBusqueda -match "No upgrades available") {
-
-    $Fin = Get-Date
-    $Duracion = $Fin - $Inicio
-
-    Separador
-    Log "================ RESULTADO FINAL ==========================="
-
-    Log "Aplicaciones encontradas : 0"
-    Log "Actualizadas             : 0"
-    Log "Fallidas                 : 0"
-    Log "Pendientes               : 0"
-
-    Log ""
-    Log "ESTADO: EQUIPO ACTUALIZADO"
-
-    Log ""
-    Log "Duracion: $($Duracion.ToString('hh\:mm\:ss'))"
-
-    Log ""
-    Log "No es necesario reiniciar el equipo."
-
-    Log ""
-    Log "Informe:"
-    Log $Informe
-
-    Read-Host "Presiona ENTER para salir"
-    exit
-}
-
-# ============================================================
-# ACTUALIZAR
-# ============================================================
-
-Separador
-Log "================ ACTUALIZANDO ==============================="
-
-Log "Iniciando actualizacion automatica..."
-Log ""
-
-$Resultado = @(
-    & winget upgrade `
+    $ResultadoWinget = @(
+        winget upgrade `
         --all `
         --include-unknown `
         --silent `
         --accept-package-agreements `
         --accept-source-agreements `
         --disable-interactivity 2>&1
-)
+    )
 
-$CodigoSalida = $LASTEXITCODE
+    $ResultadoWinget | Out-File $Log -Append -Encoding UTF8
 
-# Guardar salida
-$Resultado |
-    Out-File -FilePath $Informe -Append -Encoding UTF8
-
-# Mostrar salida
-foreach ($Linea in $Resultado) {
-
-    if (
-        $Linea -match "Instalado correctamente" -or
-        $Linea -match "Successfully installed" -or
-        $Linea -match "Successfully updated" -or
-        $Linea -match "Successfully"
-    ) {
-
-        Write-Host "[OK] $Linea"
-
-    }
-    elseif (
-        $Linea -match "Error" -or
-        $Linea -match "Failed" -or
-        $Linea -match "failed"
-    ) {
-
-        Write-Host "[ERROR] $Linea"
-
-    }
-    else {
-
+    foreach ($Linea in $ResultadoWinget) {
         Write-Host $Linea
     }
-}
 
-# ============================================================
-# DETERMINAR ACTUALIZACIONES EXITOSAS
-# ============================================================
-
-$TextoResultado = $Resultado -join "`n"
-
-$Exitos = @(
-    $Resultado |
-    Where-Object {
-        $_ -match "Instalado correctamente" -or
-        $_ -match "Successfully installed" -or
-        $_ -match "Successfully updated"
-    }
-)
-
-if ($Exitos.Count -gt 0) {
-
-    $Actualizadas = $Exitos.Count
-}
-
-# ============================================================
-# DETECTAR ERRORES
-# ============================================================
-
-$Errores = @(
-    $Resultado |
-    Where-Object {
-        $_ -match "Error" -or
-        $_ -match "Failed" -or
-        $_ -match "failed"
-    }
-)
-
-if ($Errores.Count -gt 0) {
-
-    $Fallidas = $Errores.Count
-}
-
-# ============================================================
-# COMPROBACION FINAL
-# ============================================================
-
-Separador
-Log "================ COMPROBACION FINAL ======================="
-
-Log "Consultando nuevamente WinGet..."
-Log ""
-
-$Final = @(
-    & winget upgrade `
-        --include-unknown `
-        --source winget `
-        --accept-source-agreements `
-        --disable-interactivity 2>&1
-)
-
-$TextoFinal = $Final -join "`n"
-
-$Final |
-    Out-File -FilePath $Informe -Append -Encoding UTF8
-
-if ($TextoFinal -match "No upgrades available") {
-
-    $Pendientes = 0
-
-    Log "[OK] No quedan actualizaciones pendientes."
-
-}
-else {
-
-    # Intentar obtener cantidad pendiente
-    if (
-        $TextoFinal -match
-        "(\d+)\s+actualizaciones?\s+disponibles?"
-    ) {
-
-        $Pendientes = [int]$Matches[1]
-
+    if ($LASTEXITCODE -eq 0) {
+        Escribir ""
+        Escribir "[OK] Proceso WinGet finalizado."
     }
     else {
-
-        $Pendientes = 1
+        Escribir ""
+        Escribir "[INFO] WinGet finalizo con observaciones."
     }
 
-    Log "[ADVERTENCIA] Todavia existen actualizaciones pendientes: $Pendientes"
+}
+else {
+
+    Escribir "[INFO] WinGet no esta disponible."
 }
 
 # ============================================================
-# RESULTADO
+# 2. MICROSOFT STORE
 # ============================================================
-
-$Fin = Get-Date
-$Duracion = $Fin - $Inicio
 
 Separador
-Log "================ RESULTADO FINAL ==========================="
+Escribir "ACTUALIZANDO APLICACIONES DE MICROSOFT STORE..."
+Escribir ""
 
-Log ""
-Log "Aplicaciones encontradas : $Encontradas"
-Log "Aplicaciones actualizadas: $Actualizadas"
-Log "Actualizaciones fallidas : $Fallidas"
-Log "Actualizaciones pendientes: $Pendientes"
+try {
 
-Log ""
+    $Store = Get-Command winget -ErrorAction Stop
 
-if (
-    $Fallidas -eq 0 -and
-    $Pendientes -eq 0
-) {
+    $ResultadoStore = @(
+        winget upgrade `
+        --source msstore `
+        --all `
+        --silent `
+        --accept-package-agreements `
+        --accept-source-agreements `
+        --disable-interactivity 2>&1
+    )
 
-    Log "ESTADO GENERAL: COMPLETADO CORRECTAMENTE"
+    $ResultadoStore | Out-File $Log -Append -Encoding UTF8
 
-}
-elseif (
-    $Actualizadas -gt 0 -and
-    $Pendientes -gt 0
-) {
+    foreach ($Linea in $ResultadoStore) {
+        Write-Host $Linea
+    }
 
-    Log "ESTADO GENERAL: COMPLETADO CON PENDIENTES"
-
-}
-elseif ($Fallidas -gt 0) {
-
-    Log "ESTADO GENERAL: REQUIERE REVISION"
+    Escribir ""
+    Escribir "[OK] Comprobacion de Microsoft Store finalizada."
 
 }
-else {
+catch {
 
-    Log "ESTADO GENERAL: COMPLETADO CON OBSERVACIONES"
+    Escribir "[INFO] No fue posible utilizar Microsoft Store mediante WinGet."
 }
-
-Log ""
-Log "Duracion: $($Duracion.ToString('hh\:mm\:ss'))"
-
-Log ""
-Log "REINICIO:"
-Log "No se realizara ningun reinicio automatico."
-
-Log ""
-Log "Informe guardado en:"
-Log $Informe
 
 # ============================================================
-# PANTALLA FINAL
+# 3. PROGRAMAS INSTALADOS
 # ============================================================
 
-Write-Host ""
-Write-Host "============================================================"
-Write-Host "       SOPORTETI - ACTUALIZACION FINALIZADA"
-Write-Host "============================================================"
-Write-Host ""
+Separador
+Escribir "ANALIZANDO PROGRAMAS INSTALADOS..."
+Escribir ""
 
-if (
-    $Fallidas -eq 0 -and
-    $Pendientes -eq 0
-) {
+$Programas = @()
 
-    Write-Host "ESTADO: COMPLETADO CORRECTAMENTE"
+$Rutas = @(
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
 
+foreach ($Ruta in $Rutas) {
+
+    $Datos = Get-ItemProperty $Ruta -ErrorAction SilentlyContinue
+
+    foreach ($Programa in $Datos) {
+
+        if (
+            $Programa.DisplayName -and
+            $Programa.DisplayVersion
+        ) {
+
+            $Programas += [PSCustomObject]@{
+                Nombre = $Programa.DisplayName
+                Version = $Programa.DisplayVersion
+                Fabricante = $Programa.Publisher
+            }
+        }
+    }
 }
-elseif ($Fallidas -gt 0) {
 
-    Write-Host "ESTADO: REQUIERE REVISION"
+$Programas = $Programas |
+    Sort-Object Nombre, Version -Unique
 
+Escribir "Aplicaciones instaladas detectadas: $($Programas.Count)"
+
+# ============================================================
+# 4. COMPARACION CON WINGET
+# ============================================================
+
+Separador
+Escribir "COMPROBANDO APLICACIONES NO DETECTADAS POR WINGET..."
+Escribir ""
+
+$ListaWinget = @()
+
+if ($Winget) {
+
+    $ListaWinget = @(
+        winget list --source winget `
+        --accept-source-agreements `
+        --disable-interactivity 2>&1
+    )
 }
-else {
 
-    Write-Host "ESTADO: COMPLETADO CON PENDIENTES"
+$NoDetectadas = 0
+
+foreach ($Programa in $Programas) {
+
+    $Encontrado = $false
+
+    foreach ($Linea in $ListaWinget) {
+
+        if (
+            $Linea -match [regex]::Escape($Programa.Nombre)
+        ) {
+
+            $Encontrado = $true
+            break
+        }
+    }
+
+    if (-not $Encontrado) {
+
+        $NoDetectadas++
+
+        Escribir "[INFO] No administrada por WinGet:"
+        Escribir "       $($Programa.Nombre)"
+        Escribir "       Version: $($Programa.Version)"
+        Escribir ""
+    }
 }
 
-Write-Host ""
-Write-Host "Encontradas : $Encontradas"
-Write-Host "Actualizadas: $Actualizadas"
-Write-Host "Fallidas    : $Fallidas"
-Write-Host "Pendientes  : $Pendientes"
-Write-Host ""
-Write-Host "Informe:"
-Write-Host $Informe
-Write-Host ""
+# ============================================================
+# 5. RESULTADO
+# ============================================================
+
+Separador
+Escribir "================ RESULTADO ================================"
+Escribir ""
+
+Escribir "Aplicaciones instaladas detectadas : $($Programas.Count)"
+Escribir "No administradas por WinGet        : $NoDetectadas"
+
+Escribir ""
+Escribir "WinGet:"
+Escribir "Se ejecuto la actualizacion automatica."
+
+Escribir ""
+Escribir "IMPORTANTE:"
+Escribir "Las aplicaciones que no aparecen en WinGet"
+Escribir "requieren su propio mecanismo de actualizacion"
+Escribir "o una actualizacion manual."
+
+# ============================================================
+# 6. DURACION
+# ============================================================
+
+Escribir ""
+
+$Fin = Get-Date
+
+Escribir "============================================================"
+Escribir "ESTADO: COMPLETADO"
+Escribir "============================================================"
+Escribir ""
+Escribir "No se realizara ningun reinicio automatico."
+Escribir ""
+Escribir "Informe:"
+Escribir $Log
+Escribir ""
 
 Read-Host "Presiona ENTER para salir"
 ```
-
-
-Read-Host "Presiona ENTER para salir"
-```
-

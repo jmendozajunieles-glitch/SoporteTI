@@ -1,7 +1,7 @@
 ```powershell
 # ============================================================
-# SOPORTETI - OPTIMIZACION TI V2
-# Optimizacion segura y diagnostico de rendimiento
+# SOPORTETI - OPTIMIZACION TI V3
+# Analisis inteligente + optimizacion segura
 # ============================================================
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -19,9 +19,10 @@ New-Item -ItemType Directory -Path $Logs -Force | Out-Null
 
 $Fecha = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $Inicio = Get-Date
-
 $Informe = "$Logs\Optimizacion_$Fecha.txt"
 
+$Problemas = New-Object System.Collections.Generic.List[string]
+$Recomendaciones = New-Object System.Collections.Generic.List[string]
 $Acciones = New-Object System.Collections.Generic.List[string]
 $Advertencias = New-Object System.Collections.Generic.List[string]
 
@@ -30,9 +31,7 @@ $Advertencias = New-Object System.Collections.Generic.List[string]
 # ============================================================
 
 function Log {
-    param(
-        [string]$Texto
-    )
+    param([string]$Texto)
 
     Write-Host $Texto
     $Texto | Out-File -FilePath $Informe -Append -Encoding UTF8
@@ -46,7 +45,6 @@ function Linea {
 function Obtener-CPU {
 
     try {
-
         $Resultado = Get-Counter `
             '\Processor(_Total)\% Processor Time' `
             -SampleInterval 1 `
@@ -57,23 +55,15 @@ function Obtener-CPU {
             $Resultado.CounterSamples[0].CookedValue,
             1
         )
-
     }
     catch {
-
         try {
-
             $CPU = Get-CimInstance Win32_Processor |
                 Measure-Object LoadPercentage -Average
 
-            return [math]::Round(
-                $CPU.Average,
-                1
-            )
-
+            return [math]::Round($CPU.Average,1)
         }
         catch {
-
             return 0
         }
     }
@@ -82,14 +72,12 @@ function Obtener-CPU {
 function Obtener-RAM {
 
     try {
-
         $OS = Get-CimInstance Win32_OperatingSystem
 
-        $Total = $OS.TotalVisibleMemorySize
-        $Libre = $OS.FreePhysicalMemory
+        $Total = [double]$OS.TotalVisibleMemorySize
+        $Libre = [double]$OS.FreePhysicalMemory
 
         if ($Total -gt 0) {
-
             return [math]::Round(
                 (($Total - $Libre) / $Total) * 100,
                 1
@@ -99,7 +87,6 @@ function Obtener-RAM {
         return 0
     }
     catch {
-
         return 0
     }
 }
@@ -107,12 +94,10 @@ function Obtener-RAM {
 function Obtener-Disco {
 
     try {
-
         $Disco = Get-CimInstance Win32_LogicalDisk `
             -Filter "DeviceID='C:'"
 
         if ($Disco.Size -gt 0) {
-
             return [math]::Round(
                 ($Disco.FreeSpace / $Disco.Size) * 100,
                 1
@@ -122,15 +107,13 @@ function Obtener-Disco {
         return 0
     }
     catch {
-
         return 0
     }
 }
 
-function Obtener-EspacioLibreGB {
+function Obtener-EspacioGB {
 
     try {
-
         $Disco = Get-CimInstance Win32_LogicalDisk `
             -Filter "DeviceID='C:'"
 
@@ -140,19 +123,15 @@ function Obtener-EspacioLibreGB {
         )
     }
     catch {
-
         return 0
     }
 }
 
 function Limpiar-Ruta {
 
-    param(
-        [string]$Ruta
-    )
+    param([string]$Ruta)
 
     if (-not (Test-Path $Ruta)) {
-
         return
     }
 
@@ -177,13 +156,12 @@ function Limpiar-Ruta {
         Log "[OK] Procesado: $Ruta"
         Log "     Elementos encontrados: $Cantidad"
 
-        $Acciones.Add("Limpieza: $Ruta")
-
+        $Acciones.Add("Limpieza de $Ruta")
     }
     catch {
 
-        Log "[ADVERTENCIA] No se pudo limpiar completamente: $Ruta"
-        $Advertencias.Add("Limpieza incompleta: $Ruta")
+        Log "[ADVERTENCIA] Limpieza incompleta: $Ruta"
+        $Advertencias.Add("Limpieza incompleta de $Ruta")
     }
 }
 
@@ -195,18 +173,18 @@ $Principal = New-Object Security.Principal.WindowsPrincipal(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 )
 
-$EsAdministrador = $Principal.IsInRole(
+$Administrador = $Principal.IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator
 )
 
-if (-not $EsAdministrador) {
+if (-not $Administrador) {
 
     Write-Host ""
-    Write-Host "============================================================" -ForegroundColor Red
-    Write-Host "      SOPORTETI NECESITA PERMISOS DE ADMINISTRADOR" -ForegroundColor Red
-    Write-Host "============================================================" -ForegroundColor Red
+    Write-Host "============================================================"
+    Write-Host "      SOPORTETI NECESITA PERMISOS DE ADMINISTRADOR"
+    Write-Host "============================================================"
     Write-Host ""
-    Write-Host "Abre PowerShell como Administrador y vuelve a ejecutar." -ForegroundColor Yellow
+    Write-Host "Ejecuta PowerShell como Administrador."
     Write-Host ""
 
     Read-Host "Presiona ENTER para salir"
@@ -218,11 +196,11 @@ if (-not $EsAdministrador) {
 # ============================================================
 
 Log "============================================================"
-Log "              SOPORTETI - OPTIMIZACION V2"
+Log "             SOPORTETI - OPTIMIZACION TI V3"
 Log "============================================================"
-Log "Equipo       : $env:COMPUTERNAME"
-Log "Usuario      : $env:USERNAME"
-Log "Fecha inicio : $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')"
+Log "Equipo : $env:COMPUTERNAME"
+Log "Usuario: $env:USERNAME"
+Log "Fecha  : $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')"
 Log "============================================================"
 
 # ============================================================
@@ -236,51 +214,139 @@ $Sistema = Get-CimInstance Win32_ComputerSystem
 $SO = Get-CimInstance Win32_OperatingSystem
 $CPUInfo = Get-CimInstance Win32_Processor | Select-Object -First 1
 
+$RAMGB = [math]::Round(
+    $Sistema.TotalPhysicalMemory / 1GB,
+    2
+)
+
 Log "Fabricante : $($Sistema.Manufacturer)"
 Log "Modelo     : $($Sistema.Model)"
 Log "Procesador : $($CPUInfo.Name)"
 Log "Nucleos    : $($CPUInfo.NumberOfLogicalProcessors)"
-Log "RAM total  : $([math]::Round($Sistema.TotalPhysicalMemory / 1GB,2)) GB"
+Log "RAM total  : $RAMGB GB"
 Log "Windows    : $($SO.Caption)"
 Log "Version    : $($SO.Version)"
 
 # ============================================================
-# ESTADO INICIAL
+# ANALISIS INICIAL
 # ============================================================
 
 Linea
-Log "================ ESTADO INICIAL ============================"
+Log "================ ANALISIS DEL EQUIPO ======================="
+
+Log "Analizando rendimiento..."
+Log ""
 
 $CPUAntes = Obtener-CPU
 $RAMAntes = Obtener-RAM
 $DiscoAntes = Obtener-Disco
-$EspacioAntes = Obtener-EspacioLibreGB
+$EspacioAntes = Obtener-EspacioGB
 
 Log "CPU utilizada    : $CPUAntes%"
 Log "RAM utilizada    : $RAMAntes%"
-Log "Espacio libre C: : $EspacioAntes GB"
-Log "Libre en disco   : $DiscoAntes%"
+Log "Disco libre      : $DiscoAntes%"
+Log "Espacio libre    : $EspacioAntes GB"
 
 # ============================================================
-# PROCESOS CON MAYOR CONSUMO
+# ANALISIS RAM
+# ============================================================
+
+if ($RAMAntes -ge 90) {
+
+    Log ""
+    Log "[CRITICO] Uso de RAM superior al 90%."
+
+    $Problemas.Add("Uso critico de memoria RAM")
+    $Recomendaciones.Add("Reducir aplicaciones abiertas y revisar programas de inicio")
+
+}
+elseif ($RAMAntes -ge 80) {
+
+    Log ""
+    Log "[ADVERTENCIA] Uso de RAM elevado."
+
+    $Problemas.Add("Uso elevado de memoria RAM")
+    $Recomendaciones.Add("Revisar aplicaciones de inicio y procesos pesados")
+
+}
+else {
+
+    Log ""
+    Log "[OK] Uso de RAM dentro de un rango aceptable."
+}
+
+# ============================================================
+# ANALISIS CPU
+# ============================================================
+
+if ($CPUAntes -ge 90) {
+
+    Log "[CRITICO] Uso de CPU muy elevado."
+
+    $Problemas.Add("Uso critico de CPU")
+    $Recomendaciones.Add("Revisar procesos de alto consumo")
+
+}
+elseif ($CPUAntes -ge 75) {
+
+    Log "[ADVERTENCIA] Uso de CPU elevado."
+
+    $Problemas.Add("Uso elevado de CPU")
+    $Recomendaciones.Add("Revisar procesos activos")
+
+}
+else {
+
+    Log "[OK] Uso de CPU dentro de un rango normal."
+}
+
+# ============================================================
+# ANALISIS DISCO
+# ============================================================
+
+if ($DiscoAntes -lt 15) {
+
+    Log "[CRITICO] Menos del 15% de espacio disponible."
+
+    $Problemas.Add("Poco espacio disponible")
+    $Recomendaciones.Add("Liberar espacio del disco")
+
+}
+elseif ($DiscoAntes -lt 25) {
+
+    Log "[ADVERTENCIA] Espacio disponible reducido."
+
+    $Problemas.Add("Espacio disponible reducido")
+    $Recomendaciones.Add("Realizar limpieza de almacenamiento")
+
+}
+else {
+
+    Log "[OK] Espacio disponible suficiente."
+}
+
+# ============================================================
+# PROCESOS PESADOS
 # ============================================================
 
 Linea
-Log "================ PROCESOS PESADOS =========================="
+Log "================ PROCESOS DE MAYOR CONSUMO =================="
 
 $Procesos = Get-Process |
-    Where-Object { $_.WorkingSet64 -gt 50MB } |
+    Where-Object {
+        $_.WorkingSet64 -gt 50MB
+    } |
     Sort-Object WorkingSet64 -Descending |
     Select-Object -First 10
 
 foreach ($Proceso in $Procesos) {
 
-    $RAM = [math]::Round(
+    $RAMProceso = [math]::Round(
         $Proceso.WorkingSet64 / 1MB,
         2
     )
 
-    Log "$($Proceso.ProcessName) - $RAM MB"
+    Log "$($Proceso.ProcessName) - $RAMProceso MB"
 }
 
 # ============================================================
@@ -295,28 +361,128 @@ try {
     $InicioApps = Get-CimInstance Win32_StartupCommand |
         Sort-Object Name
 
-    if ($InicioApps) {
+    $CantidadInicio = @($InicioApps).Count
 
-        foreach ($App in $InicioApps) {
+    Log "Aplicaciones detectadas: $CantidadInicio"
+    Log ""
 
-            Log " - $($App.Name)"
-        }
+    foreach ($App in $InicioApps) {
+        Log " - $($App.Name)"
+    }
+
+    if ($CantidadInicio -gt 10) {
+
+        $Problemas.Add("Cantidad elevada de aplicaciones de inicio")
+        $Recomendaciones.Add("Revisar aplicaciones que arrancan con Windows")
 
         Log ""
-        Log "[INFO] No se deshabilitaron automaticamente."
-        Log "[INFO] Se registran para revision."
+        Log "[ADVERTENCIA] Hay muchas aplicaciones de inicio."
 
     }
     else {
 
-        Log "No se encontraron aplicaciones de inicio."
+        Log ""
+        Log "[OK] Cantidad de aplicaciones de inicio razonable."
     }
 
 }
 catch {
 
-    Log "[ADVERTENCIA] No se pudo obtener la lista de inicio."
-    $Advertencias.Add("No se pudo revisar inicio.")
+    Log "[ADVERTENCIA] No fue posible analizar aplicaciones de inicio."
+    $Advertencias.Add("Analisis de inicio")
+}
+
+# ============================================================
+# DETERMINAR NIVEL
+# ============================================================
+
+Linea
+Log "================ NIVEL DE OPTIMIZACION ====================="
+
+$Nivel = "NORMAL"
+
+if ($Problemas.Count -ge 3) {
+
+    $Nivel = "PROFUNDO"
+
+}
+elseif ($Problemas.Count -ge 1) {
+
+    $Nivel = "RECOMENDADO"
+}
+
+switch ($Nivel) {
+
+    "NORMAL" {
+
+        Log "NIVEL: NORMAL"
+        Log ""
+        Log "El equipo presenta un estado general bueno."
+        Log "Se recomienda una limpieza preventiva."
+    }
+
+    "RECOMENDADO" {
+
+        Log "NIVEL: RECOMENDADO"
+        Log ""
+        Log "Se encontraron aspectos que pueden afectar"
+        Log "el rendimiento del equipo."
+    }
+
+    "PROFUNDO" {
+
+        Log "NIVEL: PROFUNDO"
+        Log ""
+        Log "Se encontraron varios indicadores de bajo rendimiento."
+        Log "Se recomienda realizar una optimizacion mas completa."
+    }
+}
+
+Log ""
+
+if ($Problemas.Count -gt 0) {
+
+    Log "Problemas encontrados:"
+
+    foreach ($Problema in $Problemas) {
+
+        Log "[!] $Problema"
+    }
+
+}
+else {
+
+    Log "[OK] No se detectaron problemas importantes."
+}
+
+# ============================================================
+# CONFIRMACION
+# ============================================================
+
+Linea
+Log "================ CONFIRMACION ==============================="
+
+Log "Nivel seleccionado: $Nivel"
+Log ""
+Log "La optimizacion realizara operaciones seguras."
+Log ""
+Log "No se desactivaran:"
+Log " - Windows Defender"
+Log " - Windows Update"
+Log " - Servicios criticos"
+Log " - Seguridad de Windows"
+Log ""
+
+$Confirmar = Read-Host "Deseas iniciar la optimizacion? (S/N)"
+
+if ($Confirmar -notmatch "^[Ss]$") {
+
+    Log ""
+    Log "Operacion cancelada por el usuario."
+    Log "Informe: $Informe"
+
+    Read-Host "Presiona ENTER para salir"
+    exit
 }
 
 # ============================================================
@@ -330,7 +496,7 @@ Limpiar-Ruta $env:TEMP
 Limpiar-Ruta "C:\Windows\Temp"
 
 # ============================================================
-# CACHE DE MINIATURAS
+# CACHE MINIATURAS
 # ============================================================
 
 Linea
@@ -338,10 +504,11 @@ Log "================ CACHE DE MINIATURAS ========================"
 
 try {
 
-    $ExplorerCache = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
+    $RutaExplorer = `
+        "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
 
     Get-ChildItem `
-        -Path $ExplorerCache `
+        -Path $RutaExplorer `
         -Filter "thumbcache*" `
         -Force `
         -ErrorAction SilentlyContinue |
@@ -350,13 +517,12 @@ try {
         -ErrorAction SilentlyContinue
 
     Log "[OK] Cache de miniaturas procesada."
-
     $Acciones.Add("Limpieza de cache de miniaturas")
 
 }
 catch {
 
-    Log "[ADVERTENCIA] No se pudo limpiar completamente la cache."
+    Log "[ADVERTENCIA] Cache no limpiada completamente."
     $Advertencias.Add("Cache de miniaturas")
 }
 
@@ -365,25 +531,22 @@ catch {
 # ============================================================
 
 Linea
-Log "================ LIMPIEZA DNS ==============================="
+Log "================ CACHE DNS =================================="
 
 try {
 
-    $DNS = ipconfig /flushdns 2>&1
-
-    foreach ($LineaDNS in $DNS) {
-
-        Log "$LineaDNS"
-    }
+    ipconfig /flushdns 2>&1 |
+        ForEach-Object {
+            Log "$_"
+        }
 
     Log "[OK] Cache DNS procesada."
-
     $Acciones.Add("Limpieza de cache DNS")
 
 }
 catch {
 
-    Log "[ADVERTENCIA] No se pudo limpiar la cache DNS."
+    Log "[ADVERTENCIA] No fue posible limpiar DNS."
     $Advertencias.Add("Cache DNS")
 }
 
@@ -402,13 +565,12 @@ try {
         -ErrorAction SilentlyContinue
 
     Log "[OK] Papelera procesada."
-
     $Acciones.Add("Limpieza de papelera")
 
 }
 catch {
 
-    Log "[ADVERTENCIA] No se pudo procesar completamente la papelera."
+    Log "[ADVERTENCIA] Papelera no procesada completamente."
     $Advertencias.Add("Papelera")
 }
 
@@ -429,18 +591,136 @@ try {
         -Name "VisualFXSetting" `
         -PropertyType DWORD `
         -Value 2 `
-        -Force `
-        | Out-Null
+        -Force |
+        Out-Null
 
-    Log "[OK] Configuracion de efectos visuales aplicada."
+    Log "[OK] Efectos visuales configurados para rendimiento."
 
     $Acciones.Add("Optimizacion de efectos visuales")
 
 }
 catch {
 
-    Log "[ADVERTENCIA] No se pudo aplicar la configuracion visual."
+    Log "[ADVERTENCIA] No se pudieron modificar efectos visuales."
     $Advertencias.Add("Efectos visuales")
+}
+
+# ============================================================
+# DISCO
+# ============================================================
+
+Linea
+Log "================ OPTIMIZACION DE DISCO ====================="
+
+Log "Windows seleccionara automaticamente la optimizacion."
+Log ""
+
+try {
+
+    $Salida = defrag.exe C: /O /U 2>&1
+    $Codigo = $LASTEXITCODE
+
+    foreach ($LineaDisco in $Salida) {
+
+        Log "$LineaDisco"
+    }
+
+    Log ""
+    Log "Codigo de salida: $Codigo"
+
+    if ($Codigo -eq 0) {
+
+        Log "[OK] Unidad C: optimizada."
+        $Acciones.Add("Optimizacion de almacenamiento")
+
+    }
+    else {
+
+        Log "[ADVERTENCIA] Codigo de salida: $Codigo"
+        $Advertencias.Add("Optimizacion de disco")
+    }
+
+}
+catch {
+
+    Log "[ADVERTENCIA] No se pudo optimizar el disco."
+    $Advertencias.Add("Optimizacion de disco")
+}
+
+# ============================================================
+# DISM
+# ============================================================
+
+Linea
+Log "================ LIMPIEZA WINDOWS ==========================="
+
+if ($Nivel -eq "PROFUNDO") {
+
+    Log "El equipo requiere optimizacion profunda."
+    Log ""
+    Log "DISM puede tardar varios minutos."
+    Log "No cierres PowerShell durante el proceso."
+    Log ""
+
+    $RespuestaDISM = Read-Host "Deseas ejecutar la limpieza DISM? (S/N)"
+
+    if ($RespuestaDISM -match "^[Ss]$") {
+
+        Log ""
+        Log "Iniciando limpieza de componentes..."
+
+        $InicioDISM = Get-Date
+
+        try {
+
+            $SalidaDISM = DISM.exe `
+                /Online `
+                /Cleanup-Image `
+                /StartComponentCleanup 2>&1
+
+            $CodigoDISM = $LASTEXITCODE
+
+            foreach ($LineaDISM in $SalidaDISM) {
+
+                Log "$LineaDISM"
+            }
+
+            $FinDISM = Get-Date
+            $TiempoDISM = $FinDISM - $InicioDISM
+
+            Log ""
+            Log "Codigo DISM : $CodigoDISM"
+            Log "Tiempo      : $($TiempoDISM.ToString('hh\:mm\:ss'))"
+
+            if ($CodigoDISM -eq 0) {
+
+                Log "[OK] Limpieza DISM completada."
+                $Acciones.Add("Limpieza DISM")
+
+            }
+            else {
+
+                Log "[ADVERTENCIA] DISM devolvio codigo $CodigoDISM."
+                $Advertencias.Add("DISM codigo $CodigoDISM")
+            }
+
+        }
+        catch {
+
+            Log "[ADVERTENCIA] Error ejecutando DISM."
+            $Advertencias.Add("DISM")
+        }
+
+    }
+    else {
+
+        Log "DISM omitido por el usuario."
+    }
+
+}
+else {
+
+    Log "[INFO] DISM no es necesario para este nivel."
 }
 
 # ============================================================
@@ -452,163 +732,20 @@ Log "================ PLAN DE ENERGIA ============================"
 
 try {
 
-    $Activo = powercfg /getactivescheme 2>&1
+    $Plan = powercfg /getactivescheme 2>&1
 
-    foreach ($LineaPower in $Activo) {
+    foreach ($LineaPower in $Plan) {
 
         Log "$LineaPower"
     }
 
     Log ""
-    Log "[INFO] No se modifico el plan de energia automaticamente."
+    Log "[OK] Plan de energia revisado."
 
 }
 catch {
 
-    Log "[ADVERTENCIA] No se pudo consultar energia."
-    $Advertencias.Add("Plan de energia")
-}
-
-# ============================================================
-# OPTIMIZACION DEL DISCO
-# ============================================================
-
-Linea
-Log "================ OPTIMIZACION DEL DISCO ===================="
-
-Log "[INFO] Windows determinara automaticamente la optimizacion."
-Log "[INFO] No se realizara una desfragmentacion forzada."
-Log ""
-
-$InicioDisco = Get-Date
-
-try {
-
-    $SalidaDisco = defrag.exe C: /O /U 2>&1
-
-    foreach ($LineaDisco in $SalidaDisco) {
-
-        Log "$LineaDisco"
-    }
-
-    $CodigoDisco = $LASTEXITCODE
-
-    $FinDisco = Get-Date
-    $TiempoDisco = $FinDisco - $InicioDisco
-
-    Log ""
-    Log "Codigo de salida : $CodigoDisco"
-    Log "Tiempo           : $($TiempoDisco.ToString('hh\:mm\:ss'))"
-
-    if ($CodigoDisco -eq 0) {
-
-        Log "[OK] Unidad C: optimizada."
-        $Acciones.Add("Optimizacion de unidad C:")
-
-    }
-    else {
-
-        Log "[ADVERTENCIA] La unidad devolvio codigo $CodigoDisco."
-        $Advertencias.Add("Optimizacion de disco")
-    }
-
-}
-catch {
-
-    Log "[ADVERTENCIA] No se pudo ejecutar la optimizacion."
-    $Advertencias.Add("Optimizacion de disco")
-}
-
-# ============================================================
-# COMPONENTES WINDOWS
-# ============================================================
-
-Linea
-Log "================ COMPONENTES WINDOWS ========================"
-
-Log "[INFO] Limpieza de componentes antiguos."
-Log ""
-Log "Esta operacion puede tardar varios minutos."
-Log "No cierres PowerShell mientras este ejecutandose."
-Log ""
-
-$RespuestaDISM = Read-Host "Deseas ejecutar la limpieza DISM? (S/N)"
-
-if ($RespuestaDISM -match "^[Ss]$") {
-
-    $InicioDISM = Get-Date
-
-    try {
-
-        $SalidaDISM = DISM.exe `
-            /Online `
-            /Cleanup-Image `
-            /StartComponentCleanup 2>&1
-
-        foreach ($LineaDISM in $SalidaDISM) {
-
-            Log "$LineaDISM"
-        }
-
-        $CodigoDISM = $LASTEXITCODE
-
-        $FinDISM = Get-Date
-        $TiempoDISM = $FinDISM - $InicioDISM
-
-        Log ""
-        Log "Codigo de salida : $CodigoDISM"
-        Log "Tiempo           : $($TiempoDISM.ToString('hh\:mm\:ss'))"
-
-        if ($CodigoDISM -eq 0) {
-
-            Log "[OK] Limpieza DISM completada."
-            $Acciones.Add("Limpieza de componentes DISM")
-
-        }
-        else {
-
-            Log "[ADVERTENCIA] DISM devolvio codigo $CodigoDISM."
-            $Advertencias.Add("DISM codigo $CodigoDISM")
-        }
-
-    }
-    catch {
-
-        Log "[ADVERTENCIA] Error ejecutando DISM."
-        $Advertencias.Add("DISM")
-    }
-
-}
-else {
-
-    Log "[INFO] Limpieza DISM omitida por el usuario."
-}
-
-# ============================================================
-# WINDOWS UPDATE - SOLO REVISION
-# ============================================================
-
-Linea
-Log "================ WINDOWS UPDATE ============================="
-
-try {
-
-    $Updates = Get-HotFix |
-        Sort-Object InstalledOn -Descending |
-        Select-Object -First 5
-
-    foreach ($Update in $Updates) {
-
-        Log "$($Update.HotFixID) - $($Update.InstalledOn)"
-    }
-
-    Log ""
-    Log "[INFO] No se instalaron actualizaciones automaticamente."
-
-}
-catch {
-
-    Log "[ADVERTENCIA] No se pudo consultar Windows Update."
+    Log "[ADVERTENCIA] No fue posible consultar energia."
 }
 
 # ============================================================
@@ -623,12 +760,12 @@ Start-Sleep -Seconds 3
 $CPUDespues = Obtener-CPU
 $RAMDespues = Obtener-RAM
 $DiscoDespues = Obtener-Disco
-$EspacioDespues = Obtener-EspacioLibreGB
+$EspacioDespues = Obtener-EspacioGB
 
 Log "CPU utilizada    : $CPUDespues%"
 Log "RAM utilizada    : $RAMDespues%"
-Log "Espacio libre C: : $EspacioDespues GB"
-Log "Libre en disco   : $DiscoDespues%"
+Log "Disco libre      : $DiscoDespues%"
+Log "Espacio libre    : $EspacioDespues GB"
 
 # ============================================================
 # COMPARACION
@@ -652,62 +789,37 @@ $EspacioLiberado = [math]::Round(
     2
 )
 
-Log "CPU antes        : $CPUAntes%"
-Log "CPU despues      : $CPUDespues%"
-Log "Cambio CPU       : $CambioCPU puntos"
+Log "CPU"
+Log "Antes   : $CPUAntes%"
+Log "Despues : $CPUDespues%"
+Log "Cambio  : $CambioCPU puntos"
 
 Log ""
 
-Log "RAM antes        : $RAMAntes%"
-Log "RAM despues      : $RAMDespues%"
-Log "Cambio RAM       : $CambioRAM puntos"
+Log "RAM"
+Log "Antes   : $RAMAntes%"
+Log "Despues : $RAMDespues%"
+Log "Cambio  : $CambioRAM puntos"
 
 Log ""
 
-Log "Disco antes      : $EspacioAntes GB libres"
-Log "Disco despues    : $EspacioDespues GB libres"
-Log "Espacio liberado : $EspacioLiberado GB"
+Log "ALMACENAMIENTO"
+Log "Antes   : $EspacioAntes GB libres"
+Log "Despues : $EspacioDespues GB libres"
+Log "Cambio  : $EspacioLiberado GB"
 
 # ============================================================
-# EVALUACION
+# RESULTADO
 # ============================================================
 
 Linea
-Log "================ EVALUACION ================================"
-
-if ($RAMDespues -ge 90) {
-
-    Log "[ADVERTENCIA] El uso de RAM continua superior al 90%."
-    $Advertencias.Add("RAM superior al 90%")
-
-}
-elseif ($RAMDespues -ge 80) {
-
-    Log "[AVISO] El uso de RAM continua elevado."
-
-}
-
-if ($DiscoDespues -lt 15) {
-
-    Log "[ADVERTENCIA] Poco espacio libre en C:."
-    $Advertencias.Add("Poco espacio libre")
-
-}
-else {
-
-    Log "[OK] Espacio disponible suficiente."
-}
-
-# ============================================================
-# RESULTADO FINAL
-# ============================================================
-
-Linea
-Log "                 RESULTADO FINAL"
-Log "============================================================"
+Log "================ RESULTADO FINAL ============================"
 
 Log ""
-Log "Acciones realizadas : $($Acciones.Count)"
+Log "Nivel aplicado: $Nivel"
+Log ""
+
+Log "ACCIONES REALIZADAS: $($Acciones.Count)"
 
 foreach ($Accion in $Acciones) {
 
@@ -715,7 +827,7 @@ foreach ($Accion in $Acciones) {
 }
 
 Log ""
-Log "Advertencias        : $($Advertencias.Count)"
+Log "ADVERTENCIAS: $($Advertencias.Count)"
 
 foreach ($Advertencia in $Advertencias) {
 
@@ -750,24 +862,28 @@ Log "Informe guardado en:"
 Log $Informe
 
 Write-Host ""
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "       SOPORTETI - OPTIMIZACION V2 FINALIZADA" -ForegroundColor Cyan
-Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "============================================================"
+Write-Host "       SOPORTETI - OPTIMIZACION V3 FINALIZADA"
+Write-Host "============================================================"
+Write-Host ""
 
 if ($Advertencias.Count -eq 0) {
 
-    Write-Host "ESTADO: OPTIMIZACION COMPLETADA" -ForegroundColor Green
+    Write-Host "ESTADO: OPTIMIZACION COMPLETADA"
 
 }
 else {
 
-    Write-Host "ESTADO: COMPLETADA CON OBSERVACIONES" -ForegroundColor Yellow
+    Write-Host "ESTADO: COMPLETADA CON OBSERVACIONES"
 }
 
 Write-Host ""
-Write-Host "Informe:" -ForegroundColor Green
-Write-Host $Informe -ForegroundColor Yellow
+Write-Host "Informe:"
+Write-Host $Informe
 Write-Host ""
+
+Read-Host "Presiona ENTER para salir"
+```
 
 Read-Host "Presiona ENTER para salir"
 ```

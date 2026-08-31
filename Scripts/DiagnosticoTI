@@ -1,0 +1,938 @@
+```powershell
+# ============================================================
+# SOPORTETI - DIAGNOSTICO TI V5
+# Diagnostico + causa probable + solucion + prioridad
+# SOLO LECTURA - NO MODIFICA EL EQUIPO
+# ============================================================
+
+$ErrorActionPreference = "SilentlyContinue"
+
+Clear-Host
+
+# ============================================================
+# CONFIGURACION
+# ============================================================
+
+$Base = "C:\SoporteTI"
+$Logs = "$Base\Logs"
+
+New-Item -ItemType Directory -Path $Logs -Force | Out-Null
+
+$Fecha = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+$Informe = "$Logs\Diagnostico_$Fecha.txt"
+$Inicio = Get-Date
+
+$Problemas = New-Object System.Collections.Generic.List[object]
+
+# ============================================================
+# FUNCIONES
+# ============================================================
+
+function Log {
+    param([string]$Texto)
+
+    Write-Host $Texto
+    $Texto | Out-File -FilePath $Informe -Append -Encoding UTF8
+}
+
+function Separador {
+    Log ""
+    Log "============================================================"
+}
+
+function Agregar-Problema {
+    param(
+        [string]$Problema,
+        [string]$Causa,
+        [string]$Solucion,
+        [string]$Prioridad
+    )
+
+    $Problemas.Add([PSCustomObject]@{
+        Problema  = $Problema
+        Causa     = $Causa
+        Solucion  = $Solucion
+        Prioridad = $Prioridad
+    })
+}
+
+function Obtener-CPU {
+
+    try {
+
+        $Resultado = Get-Counter `
+            '\Processor(_Total)\% Processor Time' `
+            -SampleInterval 1 `
+            -MaxSamples 1 `
+            -ErrorAction Stop
+
+        return [math]::Round(
+            $Resultado.CounterSamples[0].CookedValue,
+            1
+        )
+
+    }
+    catch {
+
+        try {
+
+            $CPU = Get-CimInstance Win32_Processor |
+                Measure-Object LoadPercentage -Average
+
+            return [math]::Round($CPU.Average,1)
+
+        }
+        catch {
+
+            return 0
+        }
+    }
+}
+
+function Obtener-RAM {
+
+    try {
+
+        $OS = Get-CimInstance Win32_OperatingSystem
+
+        $Total = [double]$OS.TotalVisibleMemorySize
+        $Libre = [double]$OS.FreePhysicalMemory
+
+        if ($Total -gt 0) {
+
+            return [math]::Round(
+                (($Total - $Libre) / $Total) * 100,
+                1
+            )
+        }
+
+        return 0
+    }
+    catch {
+
+        return 0
+    }
+}
+
+function Obtener-Disco {
+
+    try {
+
+        $Disco = Get-CimInstance Win32_LogicalDisk `
+            -Filter "DeviceID='C:'"
+
+        if ($Disco.Size -gt 0) {
+
+            return [math]::Round(
+                ($Disco.FreeSpace / $Disco.Size) * 100,
+                1
+            )
+        }
+
+        return 0
+    }
+    catch {
+
+        return 0
+    }
+}
+
+function Obtener-EspacioGB {
+
+    try {
+
+        $Disco = Get-CimInstance Win32_LogicalDisk `
+            -Filter "DeviceID='C:'"
+
+        return [math]::Round(
+            $Disco.FreeSpace / 1GB,
+            2
+        )
+    }
+    catch {
+
+        return 0
+    }
+}
+
+# ============================================================
+# CABECERA
+# ============================================================
+
+Log "============================================================"
+Log "              SOPORTETI - DIAGNOSTICO TI V5"
+Log "============================================================"
+Log "Equipo : $env:COMPUTERNAME"
+Log "Usuario: $env:USERNAME"
+Log "Fecha  : $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')"
+Log "============================================================"
+
+# ============================================================
+# INFORMACION DEL EQUIPO
+# ============================================================
+
+Separador
+Log "================ INFORMACION DEL EQUIPO ===================="
+
+$Sistema = Get-CimInstance Win32_ComputerSystem
+$SO = Get-CimInstance Win32_OperatingSystem
+$CPUInfo = Get-CimInstance Win32_Processor | Select-Object -First 1
+$BIOS = Get-CimInstance Win32_BIOS
+
+$RAMGB = [math]::Round(
+    $Sistema.TotalPhysicalMemory / 1GB,
+    2
+)
+
+Log "Fabricante       : $($Sistema.Manufacturer)"
+Log "Modelo           : $($Sistema.Model)"
+Log "Procesador       : $($CPUInfo.Name)"
+Log "Nucleos          : $($CPUInfo.NumberOfLogicalProcessors)"
+Log "RAM total        : $RAMGB GB"
+Log "Windows          : $($SO.Caption)"
+Log "Version          : $($SO.Version)"
+Log "Arquitectura     : $($SO.OSArchitecture)"
+Log "BIOS             : $($BIOS.SMBIOSBIOSVersion)"
+Log "Ultimo arranque  : $($SO.LastBootUpTime)"
+
+# ============================================================
+# CPU Y RAM
+# ============================================================
+
+Separador
+Log "================ RENDIMIENTO ==============================="
+
+$CPU = Obtener-CPU
+$RAM = Obtener-RAM
+
+Log "CPU utilizada : $CPU%"
+Log "RAM utilizada : $RAM%"
+
+if ($CPU -ge 95) {
+
+    Log "[CRITICO] Uso de CPU extremadamente alto."
+
+    Agregar-Problema `
+        "Uso de CPU extremadamente alto ($CPU%)" `
+        "Uno o varios procesos pueden estar utilizando excesivamente el procesador." `
+        "Revisar el Administrador de tareas y los procesos de mayor consumo. Verificar tambien actualizaciones, software en segundo plano y posibles procesos anormales." `
+        "CRITICA"
+
+}
+elseif ($CPU -ge 80) {
+
+    Log "[ADVERTENCIA] Uso de CPU elevado."
+
+    Agregar-Problema `
+        "Uso de CPU elevado ($CPU%)" `
+        "Hay procesos que estan demandando una cantidad importante de CPU." `
+        "Revisar procesos de alto consumo y cerrar aplicaciones que no sean necesarias." `
+        "MEDIA"
+}
+else {
+
+    Log "[OK] Uso de CPU normal."
+}
+
+if ($RAM -ge 95) {
+
+    Log "[CRITICO] Uso de RAM extremadamente alto."
+
+    Agregar-Problema `
+        "Uso de RAM extremadamente alto ($RAM%)" `
+        "La memoria disponible es muy reducida y Windows puede comenzar a utilizar memoria virtual." `
+        "Cerrar aplicaciones innecesarias, revisar procesos de alto consumo y verificar si el equipo necesita una ampliacion de RAM." `
+        "CRITICA"
+
+}
+elseif ($RAM -ge 85) {
+
+    Log "[ADVERTENCIA] Uso de RAM elevado."
+
+    Agregar-Problema `
+        "Uso de RAM elevado ($RAM%)" `
+        "Varias aplicaciones o servicios estan utilizando gran parte de la memoria disponible." `
+        "Revisar procesos de alto consumo y programas de inicio. Si el problema es frecuente, considerar ampliar la RAM." `
+        "MEDIA"
+
+}
+else {
+
+    Log "[OK] Uso de RAM dentro de parametros normales."
+}
+
+# ============================================================
+# DISCO
+# ============================================================
+
+Separador
+Log "================ ALMACENAMIENTO ============================"
+
+$DiscoLibre = Obtener-Disco
+$EspacioLibre = Obtener-EspacioGB
+
+$DiscoInfo = Get-CimInstance Win32_LogicalDisk `
+    -Filter "DeviceID='C:'"
+
+$CapacidadGB = [math]::Round(
+    $DiscoInfo.Size / 1GB,
+    2
+)
+
+Log "Unidad          : C:"
+Log "Capacidad       : $CapacidadGB GB"
+Log "Disponible      : $EspacioLibre GB"
+Log "Espacio libre   : $DiscoLibre%"
+
+if ($DiscoLibre -lt 10) {
+
+    Log "[CRITICO] Espacio libre extremadamente bajo."
+
+    Agregar-Problema `
+        "Espacio insuficiente en C: ($DiscoLibre%)" `
+        "El almacenamiento del sistema esta casi lleno." `
+        "Eliminar archivos temporales, revisar Descargas, papelera y aplicaciones innecesarias. No eliminar manualmente carpetas del sistema." `
+        "CRITICA"
+
+}
+elseif ($DiscoLibre -lt 20) {
+
+    Log "[ADVERTENCIA] Espacio libre reducido."
+
+    Agregar-Problema `
+        "Espacio libre reducido en C: ($DiscoLibre%)" `
+        "Windows tiene poco espacio disponible para archivos temporales, actualizaciones y operaciones del sistema." `
+        "Realizar una limpieza de almacenamiento y revisar archivos personales y aplicaciones innecesarias." `
+        "ALTA"
+
+}
+else {
+
+    Log "[OK] Espacio disponible suficiente."
+}
+
+# ============================================================
+# SALUD DEL DISCO
+# ============================================================
+
+Separador
+Log "================ SALUD DEL DISCO ==========================="
+
+try {
+
+    $Discos = Get-PhysicalDisk
+
+    foreach ($D in $Discos) {
+
+        Log "Disco : $($D.FriendlyName)"
+        Log "Tipo  : $($D.MediaType)"
+        Log "Salud : $($D.HealthStatus)"
+        Log "Estado: $($D.OperationalStatus)"
+        Log ""
+
+        if ($D.HealthStatus -ne "Healthy") {
+
+            Agregar-Problema `
+                "El disco reporta estado de salud: $($D.HealthStatus)" `
+                "Windows ha detectado que el dispositivo de almacenamiento no esta reportando un estado saludable." `
+                "Realizar copia de seguridad inmediatamente y ejecutar una revision del almacenamiento. Considerar diagnostico del fabricante." `
+                "CRITICA"
+        }
+    }
+
+}
+catch {
+
+    Log "[INFO] No fue posible obtener el estado avanzado del disco."
+}
+
+# ============================================================
+# GPU
+# ============================================================
+
+Separador
+Log "================ TARJETA GRAFICA ==========================="
+
+try {
+
+    $GPU = Get-CimInstance Win32_VideoController
+
+    foreach ($G in $GPU) {
+
+        $VRAM = 0
+
+        if ($G.AdapterRAM) {
+            $VRAM = [math]::Round(
+                $G.AdapterRAM / 1GB,
+                2
+            )
+        }
+
+        Log "GPU       : $($G.Name)"
+        Log "Memoria   : $VRAM GB"
+        Log "Driver    : $($G.DriverVersion)"
+        Log "Fecha     : $($G.DriverDate)"
+
+        if ($G.Status -ne "OK") {
+
+            Agregar-Problema `
+                "La tarjeta grafica reporta estado $($G.Status)" `
+                "El controlador o dispositivo grafico puede presentar un problema." `
+                "Actualizar el controlador desde el fabricante del equipo o del fabricante de la GPU y revisar el Administrador de dispositivos." `
+                "ALTA"
+        }
+    }
+
+}
+catch {
+
+    Log "[ADVERTENCIA] No fue posible analizar la GPU."
+}
+
+# ============================================================
+# RED
+# ============================================================
+
+Separador
+Log "================ RED ======================================="
+
+$Adaptadores = Get-NetAdapter
+
+foreach ($Adaptador in $Adaptadores) {
+
+    Log "Adaptador : $($Adaptador.Name)"
+    Log "Descripcion: $($Adaptador.InterfaceDescription)"
+    Log "Estado    : $($Adaptador.Status)"
+    Log "Velocidad : $($Adaptador.LinkSpeed)"
+    Log ""
+
+    if (
+        $Adaptador.Status -eq "Up" -and
+        $Adaptador.Name -notmatch "VPN|Bluetooth"
+    ) {
+
+        try {
+
+            $IP = Get-NetIPAddress `
+                -InterfaceIndex $Adaptador.ifIndex `
+                -AddressFamily IPv4 `
+                -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.IPAddress -notlike "169.254.*"
+                } |
+                Select-Object -First 1
+
+            if ($IP) {
+
+                Log "IP        : $($IP.IPAddress)"
+            }
+        }
+        catch {}
+    }
+}
+
+# ============================================================
+# INTERNET
+# ============================================================
+
+Separador
+Log "================ CONECTIVIDAD ==============================="
+
+$Internet = Test-NetConnection `
+    "1.1.1.1" `
+    -Port 443 `
+    -InformationLevel Quiet
+
+if ($Internet) {
+
+    Log "Internet : CONECTADO"
+
+}
+else {
+
+    Log "Internet : SIN CONEXION"
+
+    Agregar-Problema `
+        "No se pudo comprobar conexion a Internet" `
+        "Puede existir un problema de red, gateway, DNS, adaptador o conectividad externa." `
+        "Revisar cableado/Wi-Fi, direccion IP, gateway y DNS. Probar primero conectividad al gateway y posteriormente a Internet." `
+        "ALTA"
+}
+
+# ============================================================
+# PING GATEWAY
+# ============================================================
+
+try {
+
+    $Gateway = Get-NetIPConfiguration |
+        Where-Object {
+            $_.IPv4DefaultGateway
+        } |
+        Select-Object -First 1
+
+    if ($Gateway) {
+
+        $IPGateway = $Gateway.IPv4DefaultGateway.NextHop
+
+        Log "Gateway : $IPGateway"
+
+        $PingGateway = Test-Connection `
+            -ComputerName $IPGateway `
+            -Count 2 `
+            -Quiet
+
+        if ($PingGateway) {
+
+            Log "[OK] Gateway responde."
+
+        }
+        else {
+
+            Log "[ERROR] Gateway no responde."
+
+            Agregar-Problema `
+                "El gateway no responde" `
+                "El equipo puede estar desconectado de la red local o existir un problema de configuracion." `
+                "Revisar conexion Wi-Fi/cableada, direccion IP, mascara y gateway. Verificar tambien el router o switch." `
+                "ALTA"
+        }
+    }
+
+}
+catch {}
+
+# ============================================================
+# DNS
+# ============================================================
+
+Separador
+Log "================ DNS ======================================="
+
+try {
+
+    $DNS = Resolve-DnsName `
+        "www.microsoft.com" `
+        -ErrorAction Stop
+
+    Log "[OK] Resolucion DNS funcionando."
+
+}
+catch {
+
+    Log "[ERROR] No fue posible resolver nombres DNS."
+
+    Agregar-Problema `
+        "Problema de resolucion DNS" `
+        "El equipo puede tener configurado un DNS que no responde o existe un problema de conectividad." `
+        "Revisar servidores DNS configurados y probar con otro DNS autorizado por la organizacion." `
+        "MEDIA"
+}
+
+# ============================================================
+# DISPOSITIVOS
+# ============================================================
+
+Separador
+Log "================ DISPOSITIVOS ==============================="
+
+try {
+
+    $Errores = Get-PnpDevice |
+        Where-Object {
+            $_.Status -eq "Error"
+        }
+
+    if (@($Errores).Count -eq 0) {
+
+        Log "[OK] No se encontraron dispositivos con estado ERROR."
+
+    }
+    else {
+
+        Log "[ERROR] Se encontraron $(@($Errores).Count) dispositivos con problemas."
+
+        foreach ($Dispositivo in $Errores) {
+
+            Log ""
+            Log "Nombre : $($Dispositivo.FriendlyName)"
+            Log "Clase  : $($Dispositivo.Class)"
+            Log "Estado : $($Dispositivo.Status)"
+            Log "ID     : $($Dispositivo.InstanceId)"
+
+            Agregar-Problema `
+                "Dispositivo con error: $($Dispositivo.FriendlyName)" `
+                "Windows reporta un problema con el dispositivo o su controlador." `
+                "Abrir Administrador de dispositivos, identificar el codigo de error y actualizar/reinstalar el controlador correspondiente." `
+                "ALTA"
+        }
+    }
+
+}
+catch {
+
+    Log "[INFO] No fue posible consultar dispositivos Plug and Play."
+}
+
+# ============================================================
+# WINDOWS UPDATE
+# ============================================================
+
+Separador
+Log "================ WINDOWS UPDATE ============================="
+
+try {
+
+    $Updates = Get-HotFix |
+        Sort-Object InstalledOn -Descending |
+        Select-Object -First 5
+
+    foreach ($Update in $Updates) {
+
+        Log "$($Update.HotFixID) - $($Update.InstalledOn)"
+    }
+
+    Log ""
+    Log "[OK] Historial de actualizaciones consultado."
+
+}
+catch {
+
+    Log "[ADVERTENCIA] No fue posible consultar Windows Update."
+}
+
+# ============================================================
+# WINDOWS DEFENDER / ANTIVIRUS
+# ============================================================
+
+Separador
+Log "================ SEGURIDAD ================================="
+
+try {
+
+    $Defender = Get-MpComputerStatus
+
+    Log "Antivirus activo       : $($Defender.AntivirusEnabled)"
+    Log "Proteccion tiempo real : $($Defender.RealTimeProtectionEnabled)"
+
+    if (
+        $Defender.AntivirusEnabled -eq $false -and
+        $Defender.RealTimeProtectionEnabled -eq $false
+    ) {
+
+        $Antivirus = Get-CimInstance `
+            -Namespace "root\SecurityCenter2" `
+            -ClassName AntiVirusProduct
+
+        if (@($Antivirus).Count -gt 0) {
+
+            Log ""
+            Log "Antivirus registrados:"
+
+            foreach ($AV in $Antivirus) {
+
+                Log "Proveedor : $($AV.displayName)"
+                Log "Estado    : $($AV.productState)"
+            }
+
+            Log ""
+            Log "[INFO] Defender no esta activo como antivirus principal."
+            Log "Puede existir otro antivirus administrando la proteccion."
+
+        }
+        else {
+
+            Log "[ADVERTENCIA] No se detecto antivirus activo."
+
+            Agregar-Problema `
+                "No se detecto un antivirus activo" `
+                "Windows no reporta una solucion antivirus activa." `
+                "Verificar que exista un antivirus instalado y activo. No instalar varios antivirus en tiempo real simultaneamente." `
+                "CRITICA"
+        }
+    }
+
+}
+catch {
+
+    Log "[INFO] No fue posible consultar Microsoft Defender."
+}
+
+# ============================================================
+# FIREWALL
+# ============================================================
+
+Separador
+Log "================ FIREWALL =================================="
+
+try {
+
+    $Perfiles = Get-NetFirewallProfile
+
+    foreach ($Perfil in $Perfiles) {
+
+        Log "$($Perfil.Name): $($Perfil.Enabled)"
+
+        if (-not $Perfil.Enabled) {
+
+            Agregar-Problema `
+                "Firewall desactivado en perfil $($Perfil.Name)" `
+                "El perfil de Firewall de Windows no esta activo." `
+                "Verificar la politica de seguridad de la empresa y activar el Firewall si no existe otra solucion de seguridad administrandolo." `
+                "ALTA"
+        }
+    }
+
+}
+catch {
+
+    Log "[INFO] No fue posible consultar Firewall."
+}
+
+# ============================================================
+# SERVICIOS IMPORTANTES
+# ============================================================
+
+Separador
+Log "================ SERVICIOS IMPORTANTES ====================="
+
+$Servicios = @(
+    "wuauserv",
+    "BITS",
+    "Winmgmt",
+    "Dhcp",
+    "Dnscache"
+)
+
+foreach ($NombreServicio in $Servicios) {
+
+    try {
+
+        $Servicio = Get-Service `
+            -Name $NombreServicio `
+            -ErrorAction Stop
+
+        Log "$($Servicio.DisplayName) : $($Servicio.Status)"
+
+        if ($Servicio.Status -eq "Stopped") {
+
+            Log "[ADVERTENCIA] Servicio detenido: $($Servicio.DisplayName)"
+
+        }
+    }
+    catch {
+
+        Log "[INFO] Servicio no disponible: $NombreServicio"
+    }
+}
+
+# ============================================================
+# PROCESOS DE MAYOR CONSUMO
+# ============================================================
+
+Separador
+Log "================ PROCESOS =================================="
+
+$Procesos = Get-Process |
+    Sort-Object WorkingSet64 -Descending |
+    Select-Object -First 10
+
+foreach ($Proceso in $Procesos) {
+
+    $RAMProceso = [math]::Round(
+        $Proceso.WorkingSet64 / 1MB,
+        2
+    )
+
+    Log "$($Proceso.ProcessName) - $RAMProceso MB"
+}
+
+# ============================================================
+# EVENTOS RECIENTES DE ERROR
+# ============================================================
+
+Separador
+Log "================ EVENTOS DE WINDOWS ========================"
+
+try {
+
+    $Eventos = Get-WinEvent `
+        -FilterHashtable @{
+            LogName = "System"
+            Level = 2
+            StartTime = (Get-Date).AddDays(-1)
+        } `
+        -MaxEvents 10
+
+    if (@($Eventos).Count -eq 0) {
+
+        Log "[OK] No se encontraron errores criticos recientes."
+
+    }
+    else {
+
+        Log "Errores encontrados durante las ultimas 24 horas:"
+        Log ""
+
+        foreach ($Evento in $Eventos) {
+
+            Log "Fecha   : $($Evento.TimeCreated)"
+            Log "Origen  : $($Evento.ProviderName)"
+            Log "Evento  : $($Evento.Id)"
+            Log "Mensaje : $($Evento.Message)"
+            Log ""
+        }
+    }
+
+}
+catch {
+
+    Log "[INFO] No fue posible consultar eventos del sistema."
+}
+
+# ============================================================
+# RESULTADO DEL DIAGNOSTICO
+# ============================================================
+
+Separador
+Log "================ RESULTADO DEL DIAGNOSTICO ================="
+
+$Criticos = @(
+    $Problemas | Where-Object {
+        $_.Prioridad -eq "CRITICA"
+    }
+).Count
+
+$Altos = @(
+    $Problemas | Where-Object {
+        $_.Prioridad -eq "ALTA"
+    }
+).Count
+
+$Medios = @(
+    $Problemas | Where-Object {
+        $_.Prioridad -eq "MEDIA"
+    }
+).Count
+
+if ($Problemas.Count -eq 0) {
+
+    Log ""
+    Log "ESTADO GENERAL: OK"
+    Log ""
+    Log "No se encontraron problemas importantes."
+
+}
+else {
+
+    Log ""
+    Log "Problemas detectados: $($Problemas.Count)"
+    Log "Criticos            : $Criticos"
+    Log "Alta prioridad      : $Altos"
+    Log "Prioridad media     : $Medios"
+    Log ""
+
+    $Numero = 1
+
+    foreach ($P in $Problemas) {
+
+        Log "------------------------------------------------------------"
+        Log "PROBLEMA #$Numero"
+        Log "------------------------------------------------------------"
+
+        Log "Problema:"
+        Log $P.Problema
+        Log ""
+
+        Log "POSIBLE CAUSA:"
+        Log $P.Causa
+        Log ""
+
+        Log "SOLUCION RECOMENDADA:"
+        Log $P.Solucion
+        Log ""
+
+        Log "PRIORIDAD:"
+        Log $P.Prioridad
+        Log ""
+
+        $Numero++
+    }
+
+    if ($Criticos -gt 0) {
+
+        Log "ESTADO GENERAL: CRITICO"
+
+    }
+    elseif ($Altos -gt 0) {
+
+        Log "ESTADO GENERAL: REQUIERE ATENCION"
+
+    }
+    else {
+
+        Log "ESTADO GENERAL: REQUIERE REVISION"
+    }
+}
+
+# ============================================================
+# RESUMEN
+# ============================================================
+
+Separador
+Log "================ RESUMEN TECNICO ==========================="
+
+Log "Problemas totales : $($Problemas.Count)"
+Log "Criticos          : $Criticos"
+Log "Alta prioridad    : $Altos"
+Log "Prioridad media   : $Medios"
+
+$Fin = Get-Date
+$Duracion = $Fin - $Inicio
+
+Log ""
+Log "Duracion del diagnostico: $($Duracion.ToString('hh\:mm\:ss'))"
+
+Log ""
+Log "Informe guardado en:"
+Log $Informe
+
+# ============================================================
+# FINAL
+# ============================================================
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "          SOPORTETI - DIAGNOSTICO V5 FINALIZADO"
+Write-Host "============================================================"
+Write-Host ""
+
+if ($Problemas.Count -eq 0) {
+
+    Write-Host "ESTADO: OK"
+
+}
+elseif ($Criticos -gt 0) {
+
+    Write-Host "ESTADO: CRITICO"
+
+}
+elseif ($Altos -gt 0) {
+
+    Write-Host "ESTADO: REQUIERE ATENCION"
+
+}
+else {
+
+    Write-Host "ESTADO: REQUIERE REVISION"
+}
+
+Write-Host ""
+Write-Host "Problemas detectados: $($Problemas.Count)"
+Write-Host ""
+Write-Host "Informe:"
+Write-Host $Informe
+Write-Host ""
+
+Read-Host "Presiona ENTER para salir"
+```
